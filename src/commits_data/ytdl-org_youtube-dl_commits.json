@@ -1,0 +1,221 @@
+{
+  "repo_name": "ytdl-org/youtube-dl",
+  "commits": [
+    {
+      "sha": "673277e510ebd996b62a2fcc76169bf3cce29910",
+      "message": "[YouTube] Fix 91b1569",
+      "changes": [
+        {
+          "file": "youtube_dl/extractor/youtube.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -3305,7 +3305,7 @@ def _extract_lockup_view_model(self, view_model):\n             return\n         return merge_dicts(self.url_result(\n             update_url_query('https://www.youtube.com/playlist', {'list': content_id}),\n-            ie=YoutubeTabIE, video_id=content_id), {\n+            ie=YoutubeTabIE.ie_key(), video_id=content_id), {\n                 'title': traverse_obj(view_model, (\n                     'metadata', 'lockupMetadataViewModel', 'title', 'content', T(compat_str))),\n                 'thumbnails': self._extract_thumbnails(view_model, ("
+        }
+      ]
+    },
+    {
+      "sha": "711e72c292327674c4a0593fdbb83d6347738ec9",
+      "message": "[JSInterp] Fix bit-shift coercion for player 9c6dfc4a",
+      "changes": [
+        {
+          "file": "test/test_jsinterp.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -459,6 +459,10 @@ def test_bitwise_operators_typecast(self):\n         self._test('function f(){return undefined >> 5}', 0)\n         self._test('function f(){return 42 << NaN}', 42)\n         self._test('function f(){return 42 << Infinity}', 42)\n+        self._test('function f(){return 0.0 << null}', 0)\n+        self._test('function f(){return NaN << 42}', 0)\n+        self._test('function f(){return \"21.9\" << 1}', 42)\n+        self._test('function f(){return 21 << 4294967297}', 42)\n \n     def test_negative(self):\n         self._test('function f(){return 2    *    -2.0    ;}', -4)"
+        },
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -219,6 +219,10 @@\n         'https://www.youtube.com/s/player/2f1832d2/player_ias.vflset/en_US/base.js',\n         'YWt1qdbe8SAfkoPHW5d', 'RrRjWQOJmBiP',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/9c6dfc4a/player_ias.vflset/en_US/base.js',\n+        'jbu7ylIosQHyJyJV', 'uwI0ESiynAmhNg',\n+    ),\n ]\n \n "
+        },
+        {
+          "file": "youtube_dl/compat.py",
+          "additions": 5,
+          "deletions": 0,
+          "patch": "@@ -3116,17 +3116,21 @@ def compat_kwargs(kwargs):\n     compat_kwargs = lambda kwargs: kwargs\n \n \n+# compat_numeric_types\n try:\n     compat_numeric_types = (int, float, long, complex)\n except NameError:  # Python 3\n     compat_numeric_types = (int, float, complex)\n \n \n+# compat_integer_types\n try:\n     compat_integer_types = (int, long)\n except NameError:  # Python 3\n     compat_integer_types = (int, )\n \n+# compat_int\n+compat_int = compat_integer_types[-1]\n \n if sys.version_info < (2, 7):\n     def compat_socket_create_connection(address, timeout, source_address=None):\n@@ -3532,6 +3536,7 @@ def compat_datetime_timedelta_total_seconds(td):\n     'compat_http_client',\n     'compat_http_server',\n     'compat_input',\n+    'compat_int',\n     'compat_integer_types',\n     'compat_itertools_count',\n     'compat_itertools_zip_longest',"
+        }
+      ]
+    },
+    {
+      "sha": "1036478d130c5f2001eca2d7d12558abe601d933",
+      "message": "[YouTube] Endure subtitle URLs are complete\n* WEB URLs are, MWEB not\n* resolves #33017",
+      "changes": [
+        {
+          "file": "youtube_dl/extractor/youtube.py",
+          "additions": 1,
+          "deletions": 0,
+          "patch": "@@ -2435,6 +2435,7 @@ def process_subtitles():\n                 subtitles = {}\n                 for caption_track in traverse_obj(pctr, (\n                         'captionTracks', lambda _, v: v.get('baseUrl'))):\n+                    base_url = self._yt_urljoin(caption_track['baseUrl'])\n                     if not base_url:\n                         continue\n                     if caption_track.get('kind') != 'asr':"
+        }
+      ]
+    },
+    {
+      "sha": "176fc2cb003b7a74f5781a64a4e1ce32e740c149",
+      "message": "[YouTube] Avoid early crash if webpage can't be read\n* see issue #33013",
+      "changes": [
+        {
+          "file": "youtube_dl/extractor/youtube.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -1951,7 +1951,7 @@ def _real_extract(self, url):\n             pb_context = {'html5Preference': 'HTML5_PREF_WANTS'}\n \n             player_url = self._extract_player_url(webpage)\n-            ytcfg = self._extract_ytcfg(video_id, webpage)\n+            ytcfg = self._extract_ytcfg(video_id, webpage or '')\n             sts = self._extract_signature_timestamp(video_id, player_url, ytcfg)\n             if sts:\n                 pb_context['signatureTimestamp'] = sts"
+        }
+      ]
+    },
+    {
+      "sha": "eeafbbc3e59bcd6513053f5c942a55e2ff309488",
+      "message": "[YouTube] Fix signature function extraction for `2f1832d2`\n* `_` was omitted from patterns\n* thx yt-dlp/yt-dlp#11801\n\nCo-authored-by: bashonly",
+      "changes": [
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 9,
+          "deletions": 0,
+          "patch": "@@ -79,6 +79,11 @@\n         '2aq0aqSyOoJXtK73m-uME_jv7-pT15gOFC02RFkGMqWpzEICs69VdbwQ0LDp1v7j8xx92efCJlYFYb1sUkkBSPOlPmXgIARw8JQ0qOAOAA',\n         'MyOSJXtKI3m-uME_jv7-pT12gOFC02RFkGoqWpzE0Cs69VdbwQ0LDp1v7j8xx92efCJlYFYb1sUkkBSPOlPmXgIARw8JQ0qOAOAA',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/2f1832d2/player_ias.vflset/en_US/base.js',\n+        '2aq0aqSyOoJXtK73m-uME_jv7-pT15gOFC02RFkGMqWpzEICs69VdbwQ0LDp1v7j8xx92efCJlYFYb1sUkkBSPOlPmXgIARw8JQ0qOAOAA',\n+        '0QJ8wRAIgXmPlOPSBkkUs1bYFYlJCfe29xxAj7v1pDL0QwbdV96sCIEzpWqMGkFR20CFOg51Tp-7vj_EMu-m37KtXJ2OySqa0q',\n+    ),\n ]\n \n _NSIG_TESTS = [\n@@ -210,6 +215,10 @@\n         'https://www.youtube.com/s/player/f8f53e1a/player_ias.vflset/en_US/base.js',\n         'VTQOUOv0mCIeJ7i8kZB', 'kcfD8wy0sNLyNQ',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/2f1832d2/player_ias.vflset/en_US/base.js',\n+        'YWt1qdbe8SAfkoPHW5d', 'RrRjWQOJmBiP',\n+    ),\n ]\n \n "
+        }
+      ]
+    },
+    {
+      "sha": "eed784e15f6066b152a3cce8db6fe3f059290b22",
+      "message": "[YouTube] Pass nsig value as return hook, fixes player `3bb1f723`",
+      "changes": [
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 3,
+          "deletions": 1,
+          "patch": "@@ -1,4 +1,5 @@\n #!/usr/bin/env python\n+# coding: utf-8\n \n from __future__ import unicode_literals\n \n@@ -275,7 +276,8 @@ def signature(jscode, sig_input):\n \n def n_sig(jscode, sig_input):\n     funcname = YoutubeIE(FakeYDL())._extract_n_function_name(jscode)\n-    return JSInterpreter(jscode).call_function(funcname, sig_input)\n+    return JSInterpreter(jscode).call_function(\n+        funcname, sig_input, _ytdl_do_not_return=sig_input)\n \n \n make_sig_test = t_factory("
+        },
+        {
+          "file": "youtube_dl/extractor/youtube.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -1740,7 +1740,7 @@ def _extract_n_function_from_code(self, jsi, func_code):\n \n         def extract_nsig(s):\n             try:\n-                ret = func([s])\n+                ret = func([s], kwargs={'_ytdl_do_not_return': s})\n             except JSInterpreter.Exception:\n                 raise\n             except Exception as e:"
+        }
+      ]
+    },
+    {
+      "sha": "81e64cacf2b8c144ec1e9d3258db792f0eb8443e",
+      "message": "[jsinterp] Support multiple indexing (eg a[1][2])\n* extend single indexing with improved RE (should probably use/have used _separate_at_paren())\n* fix some cases that should have given undefined, not throwing\n* standardise RE group names\n* support length of objects, like {1: 2, 3: 4, length: 42}",
+      "changes": [
+        {
+          "file": "test/test_jsinterp.py",
+          "additions": 10,
+          "deletions": 0,
+          "patch": "@@ -366,6 +366,16 @@ def test_object(self):\n         self._test('function f() { let a; return a?.qq; }', JS_Undefined)\n         self._test('function f() { let a = {m1: 42, m2: 0 }; return a?.qq; }', JS_Undefined)\n \n+    def test_indexing(self):\n+        self._test('function f() { return [1, 2, 3, 4][3]}', 4)\n+        self._test('function f() { return [1, [2, [3, [4]]]][1][1][1][0]}', 4)\n+        self._test('function f() { var o = {1: 2, 3: 4}; return o[3]}', 4)\n+        self._test('function f() { var o = {1: 2, 3: 4}; return o[\"3\"]}', 4)\n+        self._test('function f() { return [1, [2, {3: [4]}]][1][1][\"3\"][0]}', 4)\n+        self._test('function f() { return [1, 2, 3, 4].length}', 4)\n+        self._test('function f() { var o = {1: 2, 3: 4}; return o.length}', JS_Undefined)\n+        self._test('function f() { var o = {1: 2, 3: 4}; o[\"length\"] = 42; return o.length}', 42)\n+\n     def test_regex(self):\n         self._test('function f() { let a=/,,[/,913,/](,)}/; }', None)\n "
+        }
+      ]
+    },
+    {
+      "sha": "dbc08fba83a0e6c5215e8cec97eb4076f85eee5f",
+      "message": "[jsinterp] Improve slice implementation for player b12cc44b\n\n\tPartly taken from yt-dlp/yt-dlp#10664, thx seproDev\n        Fixes #32896",
+      "changes": [
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -178,6 +178,10 @@\n         'https://www.youtube.com/s/player/20dfca59/player_ias.vflset/en_US/base.js',\n         '-fLCxedkAk4LUTK2', 'O8kfRq1y1eyHGw',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/b12cc44b/player_ias.vflset/en_US/base.js',\n+        'keLa5R2U00sR9SQK', 'N1OGyujjEwMnLw',\n+    ),\n ]\n \n "
+        }
+      ]
+    },
+    {
+      "sha": "71223bff39551a11b6959a3de2dd9e2f070f3c4f",
+      "message": "[Youtube] Fix nsig extraction for player 20dfca59  (#32891)\n\n* dirkf's patch for nsig extraction\r\n* add generic search per  yt-dlp/yt-dlp/pull/10611 - thx bashonly\r\n\r\n---------\r\n\r\nCo-authored-by: dirkf <fieldhouse@gmx.net>",
+      "changes": [
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -174,6 +174,10 @@\n         'https://www.youtube.com/s/player/5604538d/player_ias.vflset/en_US/base.js',\n         '7X-he4jjvMx7BCX', 'sViSydX8IHtdWA',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/20dfca59/player_ias.vflset/en_US/base.js',\n+        '-fLCxedkAk4LUTK2', 'O8kfRq1y1eyHGw',\n+    ),\n ]\n \n "
+        }
+      ]
+    },
+    {
+      "sha": "e1b3fa242cb94eb9dc949ab3f2cace91c46f11bf",
+      "message": "[Youtube] Find `n` function name in player `3400486c`\n\nFixes #32877",
+      "changes": [
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 8,
+          "deletions": 0,
+          "patch": "@@ -166,6 +166,14 @@\n         'https://www.youtube.com/s/player/b22ef6e7/player_ias.vflset/en_US/base.js',\n         'b6HcntHGkvBLk_FRf', 'kNPW6A7FyP2l8A',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/3400486c/player_ias.vflset/en_US/base.js',\n+        'lL46g3XifCKUZn1Xfw', 'z767lhet6V2Skl',\n+    ),\n+    (\n+        'https://www.youtube.com/s/player/5604538d/player_ias.vflset/en_US/base.js',\n+        '7X-he4jjvMx7BCX', 'sViSydX8IHtdWA',\n+    ),\n ]\n \n "
+        },
+        {
+          "file": "youtube_dl/extractor/youtube.py",
+          "additions": 6,
+          "deletions": 2,
+          "patch": "@@ -1659,11 +1659,15 @@ def _decrypt_nsig(self, n, video_id, player_url):\n     def _extract_n_function_name(self, jscode):\n         func_name, idx = self._search_regex(\n             # new: (b=String.fromCharCode(110),c=a.get(b))&&c=nfunc[idx](c)\n+            # or:  (b=\"nn\"[+a.D],c=a.get(b))&&(c=nfunc[idx](c)s\n             # old: .get(\"n\"))&&(b=nfunc[idx](b)\n             # older: .get(\"n\"))&&(b=nfunc(b)\n             r'''(?x)\n-                (?:\\(\\s*(?P<b>[a-z])\\s*=\\s*String\\s*\\.\\s*fromCharCode\\s*\\(\\s*110\\s*\\)\\s*,(?P<c>[a-z])\\s*=\\s*[a-z]\\s*)?\n-                \\.\\s*get\\s*\\(\\s*(?(b)(?P=b)|\"n\")(?:\\s*\\)){2}\\s*&&\\s*\\(\\s*(?(c)(?P=c)|b)\\s*=\\s*\n+                (?:\\(\\s*(?P<b>[a-z])\\s*=\\s*(?:\n+                    String\\s*\\.\\s*fromCharCode\\s*\\(\\s*110\\s*\\)|\n+                    \"n+\"\\[\\s*\\+?s*[\\w$.]+\\s*]\n+                )\\s*,(?P<c>[a-z])\\s*=\\s*[a-z]\\s*)?\n+                \\.\\s*get\\s*\\(\\s*(?(b)(?P=b)|\"n{1,2}\")(?:\\s*\\)){2}\\s*&&\\s*\\(\\s*(?(c)(?P=c)|b)\\s*=\\s*\n                 (?P<nfunc>[a-zA-Z_$][\\w$]*)(?:\\s*\\[(?P<idx>\\d+)\\])?\\s*\\(\\s*[\\w$]+\\s*\\)\n             ''', jscode, 'Initial JS player n function name', group=('nfunc', 'idx'))\n         if not idx:"
+        }
+      ]
+    },
+    {
+      "sha": "16f5bbc464602773e61eeafef51d1dbc47987bb4",
+      "message": "[YouTube] Fix nsig processing for player `b22ef6e7`\n* improve extraction of function name (like yt-dlp/yt-dlp#10390)\n* always use JSInterp to extract function code (yt-dlp/yt-dlp#10396, thx seproDev, pukkandan)",
+      "changes": [
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -162,6 +162,10 @@\n         'https://www.youtube.com/s/player/590f65a6/player_ias.vflset/en_US/base.js',\n         '1tm7-g_A9zsI8_Lay_', 'xI4Vem4Put_rOg',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/b22ef6e7/player_ias.vflset/en_US/base.js',\n+        'b6HcntHGkvBLk_FRf', 'kNPW6A7FyP2l8A',\n+    ),\n ]\n \n "
+        }
+      ]
+    },
+    {
+      "sha": "76ac69917ec76ba663da843795f46916831e6da9",
+      "message": "[jsinterp] Further improve expression parsing (fix fd8242e)\nPasses tests from yt-dlp",
+      "changes": [
+        {
+          "file": "youtube_dl/jsinterp.py",
+          "additions": 6,
+          "deletions": 3,
+          "patch": "@@ -804,16 +804,19 @@ def interpret_statement(self, stmt, local_vars, allow_recursion=100):\n             if op in ('+', '-'):\n                 # simplify/adjust consecutive instances of these operators\n                 undone = 0\n-                while len(separated) > 1 and not separated[-1].strip():\n+                separated = [s.strip() for s in separated]\n+                while len(separated) > 1 and not separated[-1]:\n                     undone += 1\n                     separated.pop()\n                 if op == '-' and undone % 2 != 0:\n                     right_expr = op + right_expr\n                 elif op == '+':\n-                    while len(separated) > 1 and separated[-1].strip() in self.OP_CHARS:\n+                    while len(separated) > 1 and set(separated[-1]) <= self.OP_CHARS:\n+                        right_expr = separated.pop() + right_expr\n+                    if separated[-1][-1:] in self.OP_CHARS:\n                         right_expr = separated.pop() + right_expr\n                 # hanging op at end of left => unary + (strip) or - (push right)\n-                left_val = separated[-1]\n+                left_val = separated[-1] if separated else ''\n                 for dm_op in ('*', '%', '/', '**'):\n                     bodmas = tuple(self._separate(left_val, dm_op, skip_delims=skip_delim))\n                     if len(bodmas) > 1 and not bodmas[-1].strip():"
+        }
+      ]
+    },
+    {
+      "sha": "ad01fa6ccadd1ecade8002e937492a141d3b8f25",
+      "message": "[jsinterp] Add Debugger from yt-dlp\n* https://github.com/yt-dlp/yt-dlp/commit/8f53dc4\n* thx pukkandan",
+      "changes": [
+        {
+          "file": "test/test_jsinterp.py",
+          "additions": 5,
+          "deletions": 3,
+          "patch": "@@ -577,9 +577,11 @@ def test_32066(self):\n     def test_unary_operators(self):\n         jsi = JSInterpreter('function f(){return 2  -  - - 2;}')\n         self.assertEqual(jsi.call_function('f'), 0)\n-        # fails\n-        # jsi = JSInterpreter('function f(){return 2 + - + - - 2;}')\n-        # self.assertEqual(jsi.call_function('f'), 0)\n+        jsi = JSInterpreter('function f(){return 2 + - + - - 2;}')\n+        self.assertEqual(jsi.call_function('f'), 0)\n+        # https://github.com/ytdl-org/youtube-dl/issues/32815\n+        jsi = JSInterpreter('function f(){return 0  - 7 * - 6;}')\n+        self.assertEqual(jsi.call_function('f'), 42)\n \n     \"\"\" # fails so far\n     def test_packed(self):"
+        },
+        {
+          "file": "test/test_youtube_signature.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -158,6 +158,10 @@\n         'https://www.youtube.com/s/player/b7910ca8/player_ias.vflset/en_US/base.js',\n         '_hXMCwMt9qE310D', 'LoZMgkkofRMCZQ',\n     ),\n+    (\n+        'https://www.youtube.com/s/player/590f65a6/player_ias.vflset/en_US/base.js',\n+        '1tm7-g_A9zsI8_Lay_', 'xI4Vem4Put_rOg',\n+    ),\n ]\n \n "
+        },
+        {
+          "file": "youtube_dl/extractor/common.py",
+          "additions": 0,
+          "deletions": 1,
+          "patch": "@@ -3033,7 +3033,6 @@ def _find_jwplayer_data(self, webpage, video_id=None, transform_source=js_to_jso\n             transform_source=transform_source, default=None)\n \n     def _extract_jwplayer_data(self, webpage, video_id, *args, **kwargs):\n-\n         # allow passing `transform_source` through to _find_jwplayer_data()\n         transform_source = kwargs.pop('transform_source', None)\n         kwfind = compat_kwargs({'transform_source': transform_source}) if transform_source else {}"
+        }
+      ]
+    },
+    {
+      "sha": "2eac0fa3799b3d027148341186a52fb5a6288473",
+      "message": "[utils] Save `orig_msg` in `ExtractorError`",
+      "changes": [
+        {
+          "file": "youtube_dl/utils.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -2406,7 +2406,7 @@ def __init__(self, msg, tb=None, expected=False, cause=None, video_id=None):\n         \"\"\" tb, if given, is the original traceback (so that it can be printed out).\n         If expected is set, this is a normal error message and most likely not a bug in youtube-dl.\n         \"\"\"\n-\n+        self.orig_msg = msg\n         if sys.exc_info()[0] in (compat_urllib_error.URLError, socket.timeout, UnavailableVideoError):\n             expected = True\n         if video_id is not None:"
+        }
+      ]
+    },
+    {
+      "sha": "21924742f79ccbd62d16ef4120518c6a5da8614e",
+      "message": "[InfoExtractor] Misc yt-dlp back-ports, etc\n* add _yes_playlist() method\n* avoid crash using _NETRC_MACHINE\n* use _search_json() in _search_nextjs_data()\n* _search_nextjs_data() default is JSON, not text\n* test for above",
+      "changes": [
+        {
+          "file": "test/test_InfoExtractor.py",
+          "additions": 3,
+          "deletions": 0,
+          "patch": "@@ -153,6 +153,9 @@ def test_search_nextjs_data(self):\n '''\n         search = self.ie._search_nextjs_data(html, 'testID')\n         self.assertEqual(search['props']['pageProps']['video']['id'], 'testid')\n+        search = self.ie._search_nextjs_data(\n+            'no next.js data here, move along', 'testID', default={'status': 0})\n+        self.assertEqual(search['status'], 0)\n \n     def test_search_nuxt_data(self):\n         html = '''"
+        }
+      ]
+    }
+  ]
+}
