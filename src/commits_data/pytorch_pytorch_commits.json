@@ -2,656 +2,82 @@
   "repo_name": "pytorch/pytorch",
   "commits": [
     {
-      "sha": "ab81ca5053440074dc7d8c46ae4775f62f662394",
-      "message": "[Inductor][CPU] Add GEMM templates for _weight_int4pack_mm_for_cpu with AVX512 (#146756)\n\n**Summary**\nIt's part of the task to enable max-autotune with GEMM template for WoQ INT4 GEMM on CPU.\n\nThis PR adds GEMM templates for `torch.ops.aten_weight_int4pack_mm_for_cpu`. The micro kernel used for the templates is based on AVX512 and it's a copy of the ATen implementation of `torch.ops.aten_weight_int4pack_mm_for_cpu` with minor changes.\n\nDue to better blocking and loop schedule, the GEMM template based implementation outperforms the ATen implementation in all cases we tested.\n\n**Test plan**\n```\npython test/inductor/test_cpu_select_algorithm.py -k test_int4_woq_mm_avx512\n```\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/146756\nApproved by: https://github.com/jgong5, https://github.com/leslie-fang-intel, https://github.com/jansel",
+      "sha": "1fcc4bc109c8110a1f2917cefd20e04a07ac6786",
+      "message": "Don't look at TESTING_ONLY in fuzzer (#146870)\n\nLots of configs aren't meant to be set because they're testing only\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/146870\nApproved by: https://github.com/masnesral",
       "changes": [
         {
-          "file": "torch/_inductor/utils.py",
-          "additions": 5,
-          "deletions": 0,
-          "patch": "@@ -1469,6 +1469,8 @@ def use_cpp_gemm_template(\n     mat2: IRNode,\n     mat2_transposed: bool = False,\n     require_constant_mat2: bool = True,\n+    is_woq_int4: bool = False,\n+    q_group_size: Optional[int] = None,\n ) -> bool:\n     from . import ir\n     from .codegen.cpp_micro_gemm import create_micro_gemm\n@@ -1488,6 +1490,7 @@ def use_cpp_gemm_template(\n         mat2,\n         out_dtype=layout.dtype if int8_gemm else None,\n         mat2_transposed=mat2_transposed,\n+        use_4x2_dim=is_woq_int4,\n     )\n \n     # TODO(jgong5): support dynamic shapes for n or k\n@@ -1506,6 +1509,8 @@ def use_cpp_gemm_template(\n         input2_dtype=mat2.get_dtype(),\n         output_dtype=output_dtype,\n         num_threads=parallel_num_threads(),\n+        use_ref=not is_woq_int4,\n+        q_group_size=q_group_size,\n     )\n \n     def is_last_dim_stride1(x: IRNode) -> bool:"
+          "file": "torch/_inductor/fuzzer.py",
+          "patch": "@@ -811,6 +811,7 @@ def bisect(self, num_attempts: int = 100, p: float = 0.5) -> list[ConfigType]:\n                 if (\n                     field_name not in config\n                     and not field_name.startswith(\"_\")\n+                    and \"TESTING_ONLY\" not in field_name\n                     and random.random() < p\n                 ):\n                     value = self.sample("
         }
       ]
     },
     {
-      "sha": "608377d3418653932d6461093a77db44e720290d",
-      "message": "Revert \"[import][inductor] Simplify grid handling (#147583)\"\n\nThis reverts commit b59776d8572a56e2d2366174eac11015b1776f1e.\n\nReverted https://github.com/pytorch/pytorch/pull/147583 on behalf of https://github.com/facebook-github-bot due to Diff reverted internally ([comment](https://github.com/pytorch/pytorch/pull/147583#issuecomment-2693016036))",
+      "sha": "8c45d44abba5e5da19fa84c03e1aa19f0cb09c7f",
+      "message": "Skip distributed subprocess test internally as they don't work (#148909)\n\nFollow up from https://github.com/pytorch/pytorch/pull/146098\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148909\nApproved by: https://github.com/janeyx99",
       "changes": [
         {
-          "file": "test/inductor/test_aot_inductor.py",
-          "additions": 4,
-          "deletions": 3,
-          "patch": "@@ -4086,9 +4086,10 @@ def forward(self, x):\n         # input u0 was defined as int32_t initially, verify for every kernel var args downstream,\n         # it gets explicitly declared using its data types in the cpp wrapper codegen code.\n         expected_scalar_args = [\n-            \"buf3, u0\",\n-            \"buf4, u0\",\n-            \"buf3, buf4, buf2, u0\",\n+            \"int64_t var_1 = u0;\",\n+            \"int64_t var_4 = u0;\",\n+            \"int64_t var_7 = u0;\",\n+            \"int64_t var_12 = u0;\",\n         ]\n         # check the new behavior of codegen is expected\n         result, code = run_and_get_cpp_code("
-        },
-        {
-          "file": "test/inductor/test_cuda_repro.py",
-          "additions": 3,
-          "deletions": 4,
-          "patch": "@@ -550,7 +550,7 @@ def test_autotune_inplace_kernel(self):\n         \"\"\"\n         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream\n         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType\n-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner\n+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid\n \n         def autotune(configs, meta):\n             def decorator(fn):\n@@ -564,7 +564,6 @@ def decorator(fn):\n                     reset_to_zero_arg_names=[],\n                     optimize_mem=True,\n                     heuristic_type=HeuristicType.POINTWISE,\n-                    inductor_meta={\"grid_type\": \"Grid1D\"},\n                 )\n \n             return decorator\n@@ -604,8 +603,8 @@ def kernel(in_out_ptr0, in_ptr0, xnumel, XBLOCK: tl.constexpr):\n         inout2 = inout1.clone()\n \n         stream0 = get_cuda_stream(0)\n-        kernel.run(inout1, in0, xnumel, stream=stream0)\n-        kernel.run(inout2, in0, xnumel, stream=stream0)\n+        kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)\n+        kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)\n \n         assert same(\n             inout1, inout2, tol=0.001, equal_nan=True"
-        },
-        {
-          "file": "test/inductor/test_max_autotune.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -53,7 +53,7 @@ def _get_func_call() -> str:\n \n \n def _get_kernel_launch() -> str:\n-    return \"call_triton_\" if config.cpp_wrapper else \".run(\"\n+    return \"launchKernel(\" if config.cpp_wrapper else \".run(\"\n \n \n def benchmark_choice(choice, args, out, expected_out, timings):"
-        },
-        {
-          "file": "test/inductor/test_profiler.py",
-          "additions": 3,
-          "deletions": 0,
-          "patch": "@@ -265,6 +265,9 @@ def check_triton_event(e) -> None:\n             self.assertEqual(args[\"kernel_backend\"], \"triton\", msg=f\"event = {e}\")\n \n             self.assertTrue(\"stream\" in args, msg=f\"event = {e}\")\n+            self.assertTrue(\"grid\" in args, msg=f\"event = {e}\")\n+            self.assertTrue(args[\"grid\"].startswith(\"grid\"), msg=f\"event = {e}\")\n+\n             self.assertTrue(\"kernel_file\" in args, msg=f\"event = {e}\")\n             kernel_file = args[\"kernel_file\"]\n             self.assertTrue(os.path.isfile(kernel_file), msg=f\"event = {e}\")"
-        },
-        {
-          "file": "test/inductor/test_select_algorithm.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -353,6 +353,7 @@ def test_TritonTemplateCaller_str(self):\n             module_path=module_path,\n             module_cache_key=None,\n             kernel_name=None,\n+            grid=None,\n             extra_args=None,\n             num_stages=None,\n             num_warps=None,"
-        },
-        {
-          "file": "test/inductor/test_torchinductor.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -3985,7 +3985,7 @@ def foo(m, inp):\n             _, code = run_and_get_code(foo, grouped_conv, input_tensor)\n             # no to channels last permuting before kernel\n             if config.cpp_wrapper:\n-                FileCheck().check_not(\"  call_triton\").check(\"_convolution(\").run(\n+                FileCheck().check_not(\"launchKernel(triton\").check(\"_convolution(\").run(\n                     code[0]\n                 )\n             else:"
-        },
-        {
-          "file": "test/inductor/test_triton_kernels.py",
-          "additions": 2,
-          "deletions": 4,
-          "patch": "@@ -3635,10 +3635,8 @@ def grid(META):\n         output = \"\\n\".join(record.getMessage() for record in log.records)\n         # correct grid example values updated per block size\n         FileCheck().check(\"Compile-time auto-tuning block:\").check(\n-            \"PrecomputedGrid\"\n-        ).check(\"(31 + _launcher_s0) // 32\").check(\"(127 + _launcher_s0) // 128\").run(\n-            output\n-        )\n+            \"grid_wrapper_for_op_zeros_0\"\n+        ).check_next(\"return (256\").check_next(\"return (64\").run(output)\n \n     # Triton 3.2.0 adds the required flags to the Autotuner object for this test\n     # PR: https://github.com/triton-lang/triton/pull/5092"
-        },
-        {
-          "file": "torch/_inductor/autotune_process.py",
-          "additions": 7,
-          "deletions": 2,
-          "patch": "@@ -639,6 +639,7 @@ def __init__(\n         extra_args: Iterable[Any],\n         module_path: str,  # the path of the module defining the triton kernel\n         module_cache_key: str,\n+        grid: list[int],\n         num_stages: int,\n         num_warps: int,\n         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.\n@@ -647,6 +648,7 @@ def __init__(\n         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)\n         self.module_path = module_path\n         self.module_cache_key = module_cache_key\n+        self.grid = grid\n         self.num_stages = num_stages\n         self.num_warps = num_warps\n         self.matrix_instr_nonkdim = matrix_instr_nonkdim\n@@ -698,15 +700,16 @@ def run_with_workspace():\n                 )\n \n                 # Handle zero initialization if needed\n-                if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:\n+                if workspace_arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:\n                     workspace_tensor.zero_()\n \n                 # Run the kernel with workspace\n                 run_method(\n                     *input_tensors,\n                     output_tensor,\n-                    workspace_tensor,\n                     *extra_args,\n+                    workspace_tensor,\n+                    grid=self.grid,\n                     **warmup_arg,\n                     stream=stream,\n                     benchmark_run=True,\n@@ -722,6 +725,7 @@ def run_with_workspace():\n                 *input_tensors,\n                 output_tensor,\n                 *extra_args,\n+                grid=self.grid,\n                 **warmup_arg,\n                 stream=stream,\n             )\n@@ -731,6 +735,7 @@ def run_with_workspace():\n                 *input_tensors,\n                 output_tensor,\n                 *extra_args,\n+                grid=self.grid,\n                 **warmup_arg,\n                 stream=stream,\n                 benchmark_run=True,"
-        },
-        {
-          "file": "torch/_inductor/codecache.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -1358,7 +1358,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:\n \n @clear_on_fresh_inductor_cache\n class CudaKernelParamCache:\n-    cache: dict[str, dict[str, Any]] = {}\n+    cache: dict[str, dict[str, str]] = {}\n     cache_clear = staticmethod(cache.clear)\n \n     @classmethod\n@@ -1376,7 +1376,7 @@ def set(cls, key: str, params: dict[str, str], cubin: str, bin_type: str) -> Non\n         cls.cache[key] = params\n \n     @classmethod\n-    def get(cls, key: str) -> Optional[dict[str, Any]]:\n+    def get(cls, key: str) -> Optional[dict[str, str]]:\n         return cls.cache.get(key, None)\n \n     @classmethod"
-        },
-        {
-          "file": "torch/_inductor/codegen/common.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -1550,7 +1550,7 @@ def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:\n \n     def python_argdefs(\n         self,\n-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:\n+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:\n         arg_defs: list[ArgName] = []\n         call_args: list[str] = []\n         arg_types: list[torch.dtype] = []"
-        },
-        {
-          "file": "torch/_inductor/codegen/cpp.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -5204,7 +5204,7 @@ def codegen_group(self, name=None) -> str:\n     def call_kernel(self, wrapper, kernel_name):\n         _, call_args, arg_types = self.args.cpp_argdefs()\n         wrapper.generate_kernel_call(\n-            kernel_name, call_args, triton=False, arg_types=arg_types\n+            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types\n         )\n \n "
-        },
-        {
-          "file": "torch/_inductor/codegen/cpp_template_kernel.py",
-          "additions": 3,
-          "deletions": 1,
-          "patch": "@@ -118,7 +118,9 @@ def hook():\n     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):\n         wrapper = V.graph.wrapper_code\n         _, call_args, arg_types = self.args.cpp_argdefs()\n-        wrapper.generate_kernel_call(name, call_args, triton=False, arg_types=arg_types)\n+        wrapper.generate_kernel_call(\n+            name, call_args, triton=False, gpu=False, arg_types=arg_types\n+        )\n \n     def dtype(self, node: ir.Buffer) -> str:\n         return DTYPE_TO_CPP[node.get_dtype()]"
-        },
-        {
-          "file": "torch/_inductor/codegen/cuda/cuda_kernel.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -341,6 +341,7 @@ def call_kernel(\n         wrapper.generate_kernel_call(\n             name,\n             call_args,\n+            gpu=True,\n             triton=False,\n             arg_types=arg_types,\n         )"
-        },
-        {
-          "file": "torch/_inductor/codegen/debug_utils.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -251,7 +251,7 @@ def codegen_intermediate_tensor_value_print(\n                 continue\n             if V.graph.cpp_wrapper:\n                 if arg_signatures is not None and isinstance(\n-                    arg_signatures[i], torch_dtype\n+                    arg_signatures[i], (torch_dtype)\n                 ):\n                     # infer from the arg data type (has torch.dtype) to see if it is a tensor type\n                     V.graph.wrapper_code.writeline("
-        },
-        {
-          "file": "torch/_inductor/codegen/halide.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -1633,7 +1633,7 @@ def call_kernel(self, name: str, node=None):\n         wrapper.generate_kernel_call(\n             name,\n             call_args,\n-            device=current_device,\n+            gpu=False,  # grid/stream is handled internally in halide\n             triton=False,\n         )\n "
-        },
-        {
-          "file": "torch/_inductor/codegen/mps.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -569,7 +569,7 @@ def call_kernel(self, name: str, node: Any = None) -> None:\n         wrapper.generate_kernel_call(\n             name,\n             args,\n-            device=torch.device(\"cpu\"),  # TODO: Fix me, MPS does not expose streams now\n+            gpu=False,  # TODO: Fix me, MPS does not expose streams now\n             triton=False,\n         )\n "
-        },
-        {
-          "file": "torch/_inductor/codegen/rocm/rocm_kernel.py",
-          "additions": 3,
-          "deletions": 0,
-          "patch": "@@ -196,9 +196,12 @@ def call_kernel(\n             kernel_args.append(\"nullptr\" if V.graph.cpp_wrapper else \"None\")\n         if V.graph.cpp_wrapper:\n             arg_types.append(\"uint8_t*\")\n+        current_device = V.graph.get_current_device_or_throw()\n         wrapper.generate_kernel_call(\n             name,\n             kernel_args,\n+            device_index=current_device.index,\n+            gpu=True,\n             triton=False,\n             arg_types=arg_types,\n         )"
-        },
-        {
-          "file": "torch/_inductor/codegen/simd.py",
-          "additions": 4,
-          "deletions": 1,
-          "patch": "@@ -1549,10 +1549,13 @@ def codegen_template(\n \n             if config.benchmark_kernel:\n                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9\n+                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)\n+                assert kernel.meta is not None, \"meta is None\"\n+                grid = kernel.grid_fn(*grid_args, kernel.meta)\n                 src_code = (\n                     f\"{kernel.imports_for_benchmark_kernel()}\\n\"\n                     f\"{src_code}\\n\"\n-                    f\"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}\"\n+                    f\"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}\"\n                 )\n \n             if only_gen_src_code:"
-        },
-        {
-          "file": "torch/_inductor/codegen/triton_split_scan.py",
-          "additions": 3,
-          "deletions": 3,
-          "patch": "@@ -11,7 +11,7 @@\n     TritonCSEVariable,\n     TritonKernel,\n )\n-from torch._inductor.runtime.triton_heuristics import SplitScanGrid\n+from torch._inductor.runtime.triton_heuristics import split_scan_grid\n from torch.utils._ordered_set import OrderedSet\n from torch.utils._sympy.functions import CeilDiv\n \n@@ -203,5 +203,5 @@ def scan(self, dtypes, combine_fn, values):\n     def _get_heuristic(self):\n         return \"split_scan\"\n \n-    def _get_grid_type(self) -> type[SplitScanGrid]:\n-        return SplitScanGrid\n+    def _get_grid_fn(self):\n+        return split_scan_grid"
-        },
-        {
-          "file": "torch/_inductor/compile_fx.py",
-          "additions": 3,
-          "deletions": 5,
-          "patch": "@@ -1143,6 +1143,8 @@ def log_graph_runnable() -> str:\n                                     serialized_extern_kernel_nodes,\n                                 )\n \n+                            additional_files = graph.wrapper_code.additional_files\n+\n                             with dynamo_timed(\n                                 \"AotCodeCompiler.compile\", log_pt2_compile_event=True\n                             ):\n@@ -1152,11 +1154,7 @@ def log_graph_runnable() -> str:\n                                     code,\n                                     serialized_extern_kernel_nodes,\n                                     device_type=graph.device_type,\n-                                    additional_files=[\n-                                        *dict.fromkeys(\n-                                            graph.wrapper_code.additional_files\n-                                        )\n-                                    ],\n+                                    additional_files=additional_files,\n                                 )\n                         else:\n                             compiled_fn = graph.compile_to_module().call"
-        },
-        {
-          "file": "torch/_inductor/fx_passes/b2b_gemm.py",
-          "additions": 2,
-          "deletions": 4,
-          "patch": "@@ -27,7 +27,6 @@\n from ..select_algorithm import (\n     autotune_select_algorithm,\n     ExternKernelChoice,\n-    SymbolicGridFn,\n     TritonTemplate,\n     TritonTemplateCaller,\n )\n@@ -39,9 +38,8 @@\n )\n \n \n-@SymbolicGridFn\n-def b2b_gemm_grid(M, P, meta, *, cdiv):\n-    return (cdiv(M, meta[\"BLOCK_SIZE_M\"]) * cdiv(P, meta[\"BLOCK_SIZE_P\"]), 1, 1)\n+def b2b_gemm_grid(M, P, meta):\n+    return (ceildiv(M, meta[\"BLOCK_SIZE_M\"]) * ceildiv(P, meta[\"BLOCK_SIZE_P\"]), 1, 1)\n \n \n b2b_gemm_left_template = TritonTemplate("
-        },
-        {
-          "file": "torch/_inductor/kernel/bmm.py",
-          "additions": 2,
-          "deletions": 3,
-          "patch": "@@ -8,10 +8,10 @@\n from ..select_algorithm import (\n     autotune_select_algorithm,\n     ExternKernelChoice,\n-    SymbolicGridFn,\n     TritonTemplate,\n )\n from ..utils import (\n+    ceildiv as cdiv,\n     use_aten_gemm_kernels,\n     use_ck_gemm_template,\n     use_cpp_bmm_template,\n@@ -33,8 +33,7 @@\n aten = torch.ops.aten\n \n \n-@SymbolicGridFn\n-def bmm_grid(b, m, n, meta, *, cdiv):\n+def bmm_grid(b, m, n, meta):\n     return (cdiv(m, meta[\"BLOCK_M\"]) * cdiv(n, meta[\"BLOCK_N\"]), b, 1)\n \n "
-        },
-        {
-          "file": "torch/_inductor/kernel/flex_decoding.py",
-          "additions": 1,
-          "deletions": 2,
-          "patch": "@@ -12,7 +12,7 @@\n from ..ir import FixedLayout, FlexibleLayout\n from ..lowering import empty, empty_strided, lowerings\n from ..runtime.runtime_utils import is_power_of_2, next_power_of_2\n-from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate\n+from ..select_algorithm import autotune_select_algorithm, TritonTemplate\n from .flex_attention import (\n     compute_forward_block_mn,\n     compute_forward_inner,\n@@ -30,7 +30,6 @@\n prims = torch.ops.prims\n \n \n-@SymbolicGridFn\n def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):\n     \"\"\"How is this kernel parallelized?\n     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)"
-        },
-        {
-          "file": "torch/_inductor/kernel/mm_common.py",
-          "additions": 4,
-          "deletions": 5,
-          "patch": "@@ -8,7 +8,7 @@\n import sympy\n \n import torch\n-from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn\n+from torch._inductor.select_algorithm import realize_inputs\n from torch._inductor.virtualized import V\n from torch.utils._ordered_set import OrderedSet\n \n@@ -17,6 +17,7 @@\n from ..ir import ChoiceCaller, Layout\n from ..runtime.runtime_utils import next_power_of_2\n from ..utils import (\n+    ceildiv as cdiv,\n     get_backend_num_stages,\n     get_num_sms,\n     TMA_DESCRIPTOR_SIZE,\n@@ -441,16 +442,14 @@ def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:\n     return fallback_to_aten\n \n \n-@SymbolicGridFn\n-def mm_grid(m, n, meta, *, cdiv):\n+def mm_grid(m, n, meta):\n     \"\"\"\n     The CUDA grid size for matmul triton templates.\n     \"\"\"\n     return (cdiv(m, meta[\"BLOCK_M\"]) * cdiv(n, meta[\"BLOCK_N\"]), 1, 1)\n \n \n-@SymbolicGridFn\n-def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):\n+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):\n     \"\"\"Defines the grid for persistent kernels.\"\"\"\n     return (\n         min(meta[\"NUM_SMS\"], cdiv(M, meta[\"BLOCK_M\"]) * cdiv(N, meta[\"BLOCK_N\"])),"
-        },
-        {
-          "file": "torch/_inductor/scheduler.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -3863,7 +3863,7 @@ def free_buffers(self) -> None:\n         for name in sorted(\n             self.buffer_names_to_free\n             - V.graph.removed_buffers\n-            - V.graph.wrapper_code.freed  # type: ignore[has-type]\n+            - V.graph.wrapper_code.freed\n         ):\n             if name in self.name_to_buf:\n                 buf = self.name_to_buf[name]\n@@ -4122,7 +4122,7 @@ def _codegen_partition_wrapper(\n         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)\n \n         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)\n-        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]\n+        V.graph.wrapper_code.allocated.update(\n             [node.get_name() for node in signature.output_nodes]\n         )\n "
+          "file": "test/distributed/test_c10d_common.py",
+          "patch": "@@ -8,6 +8,7 @@\n import tempfile\n import threading\n import time\n+import unittest\n from contextlib import nullcontext\n from dataclasses import dataclass\n from datetime import timedelta\n@@ -35,6 +36,8 @@\n )\n from torch.testing._internal.common_utils import (\n     instantiate_parametrized_tests,\n+    IS_FBCODE,\n+    IS_SANDCASTLE,\n     load_tests,\n     parametrize,\n     retry_on_connect_failures,\n@@ -1908,6 +1911,7 @@ def test_init_process_group_for_all_backends(self):\n \n             dist.destroy_process_group()\n \n+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, \"subprocess test fails in fbcode\")\n     def test_default_process_group(self):\n         script = \"\"\"\n # Hide all GPUs"
         }
       ]
     },
     {
-      "sha": "edaff88f69f069d517b72ea23fd5eb04702eb0b5",
-      "message": "[fx] Move map_aggregate to C++ (#148243)\n\nMicrobenchmarking `fx.symbolic_trace(lambda x: functools.reduce(operator.add, [x, *range(100000)]))`, before:\n```\n30603618 function calls (29403419 primitive calls) in 13.744 seconds\n```\nafter:\n```\n25203549 function calls (24403352 primitive calls) in 12.090 seconds\n```\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148243\nApproved by: https://github.com/oulgen",
-      "changes": [
-        {
-          "file": "torch/_dynamo/polyfills/loader.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -20,6 +20,7 @@\n     \"os\",\n     \"pytree\",\n     \"sys\",\n+    \"fx\",\n )\n POLYFILLED_MODULES: tuple[\"ModuleType\", ...] = tuple(\n     importlib.import_module(f\".{submodule}\", package=polyfills.__name__)"
-        },
-        {
-          "file": "torch/fx/graph.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -19,11 +19,11 @@\n \n import torch\n import torch.utils._pytree as pytree\n-from torch._C import _NodeIter\n+from torch._C import _fx_map_arg as map_arg, _NodeIter\n \n from . import _pytree as fx_pytree\n from ._compatibility import compatibility\n-from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target\n+from .node import _get_qualified_name, _type_repr, Argument, Node, Target\n \n \n __all__ = [\"PythonCode\", \"CodeGen\", \"Graph\"]"
-        },
-        {
-          "file": "torch/fx/proxy.py",
-          "additions": 4,
-          "deletions": 3,
-          "patch": "@@ -15,11 +15,12 @@\n \n import torch\n import torch.fx.traceback as fx_traceback\n+from torch._C import _fx_map_aggregate as map_aggregate\n from torch.utils._traceback import CapturedTraceback\n \n from ._compatibility import compatibility\n from .graph import Graph, magic_methods, reflectable_magic_methods\n-from .node import Argument, base_types, map_aggregate, Node, Target\n+from .node import Argument, base_types, Node, Target\n from .operator_schemas import check_for_mutable_operation\n \n \n@@ -584,8 +585,8 @@ def find_tracer(a):\n             if isinstance(a, cls):\n                 tracers[a.tracer] = None\n \n-        torch.fx.node.map_aggregate(args, find_tracer)\n-        torch.fx.node.map_aggregate(kwargs, find_tracer)\n+        map_aggregate(args, find_tracer)\n+        map_aggregate(kwargs, find_tracer)\n \n         if len(tracers) > 1:\n             raise RuntimeError("
-        }
-      ]
-    },
-    {
-      "sha": "9aa897b992813987d4ac00f9ad921b2bb0267b9c",
-      "message": "Remove unnecessary tensor clone (#148159)\n\nFixes #ISSUE_NUMBER\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148159\nApproved by: https://github.com/Skylion007",
-      "changes": [
-        {
-          "file": "torch/testing/_internal/common_utils.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -2297,7 +2297,7 @@ def to_gpu(obj, type_map=None):\n         assert obj.is_leaf\n         t = type_map.get(obj.dtype, obj.dtype)\n         with torch.no_grad():\n-            res = obj.clone().to(dtype=t, device=\"cuda\")\n+            res = obj.to(dtype=t, device=\"cuda\", copy=True)\n             res.requires_grad = obj.requires_grad\n         return res\n     elif torch.is_storage(obj):"
-        }
-      ]
-    },
-    {
-      "sha": "1d7397a2d04a4d636559f41511a20f7dadbe5777",
-      "message": "[Inductor] Avoid tensor slice overflow for large step (#147433)\n\nFixes #147071\n\nCurrently, if step is a value very close to INT64_MAX, the calculation of slice output length will overflow. This PR tries to fix this problem and thus fix #147071.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/147433\nApproved by: https://github.com/leslie-fang-intel, https://github.com/jansel",
-      "changes": [
-        {
-          "file": "torch/_decomp/__init__.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -477,6 +477,7 @@ def _core_aten_decompositions_post_autograd() -> dict[\n             aten.sinc,\n             aten.sinc_,\n             aten.slice_backward,\n+            aten.slice_copy,\n             aten.smooth_l1_loss,\n             aten.smooth_l1_loss_backward,\n             aten.soft_margin_loss,"
-        }
-      ]
-    },
-    {
-      "sha": "b59776d8572a56e2d2366174eac11015b1776f1e",
-      "message": "[import][inductor] Simplify grid handling (#147583)\n\nBefore this PR, calling a triton kernel would look like:\n```py\nkernel.run(a, b, xnumel, grid=grid(xnumel), stream=stream0)\n```\nwhere the `grid=` was passed as a callable (function closure) arg.  This PR removes the grid arg:\n```py\nkernel.run(a, b, xnumel, stream=stream0)\n```\ninstead now the grid computation is included in the kernel launcher, with something like:\n```py\ndef launcher(in_ptr0, out_ptr0, xnumel, stream):\n    grid_0 = ((xnumel + 1023) >> 10)\n    grid_1 = 1\n    grid_2 = 1\n    runner(grid_0, grid_1, grid_2, stream, function, metadata, None, launch_enter_hook, launch_exit_hook, in_ptr0, out_ptr0, xnumel)\n```\n\nThis should be faster, since we remove multiple function/dict calls and are able to specialize the grid computation for each `triton.Config`.\n\nIt also allows us to unify the handling of grids between the Python and C++ wrapper code.  Before this, C++ wrapper code didn't actually support dynamic grid sizes and instead burned in a static grid.\n\nThis unification allows this PR to be a net deletion of code.\n\nNote the attached diff contains some minor fbcode-only changes.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/147583\nApproved by: https://github.com/eellison, https://github.com/shunting314",
-      "changes": [
-        {
-          "file": "test/inductor/test_aot_inductor.py",
-          "additions": 3,
-          "deletions": 4,
-          "patch": "@@ -4086,10 +4086,9 @@ def forward(self, x):\n         # input u0 was defined as int32_t initially, verify for every kernel var args downstream,\n         # it gets explicitly declared using its data types in the cpp wrapper codegen code.\n         expected_scalar_args = [\n-            \"int64_t var_1 = u0;\",\n-            \"int64_t var_4 = u0;\",\n-            \"int64_t var_7 = u0;\",\n-            \"int64_t var_12 = u0;\",\n+            \"buf3, u0\",\n+            \"buf4, u0\",\n+            \"buf3, buf4, buf2, u0\",\n         ]\n         # check the new behavior of codegen is expected\n         result, code = run_and_get_cpp_code("
-        },
-        {
-          "file": "test/inductor/test_cuda_repro.py",
-          "additions": 4,
-          "deletions": 3,
-          "patch": "@@ -550,7 +550,7 @@ def test_autotune_inplace_kernel(self):\n         \"\"\"\n         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream\n         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType\n-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid\n+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner\n \n         def autotune(configs, meta):\n             def decorator(fn):\n@@ -564,6 +564,7 @@ def decorator(fn):\n                     reset_to_zero_arg_names=[],\n                     optimize_mem=True,\n                     heuristic_type=HeuristicType.POINTWISE,\n+                    inductor_meta={\"grid_type\": \"Grid1D\"},\n                 )\n \n             return decorator\n@@ -603,8 +604,8 @@ def kernel(in_out_ptr0, in_ptr0, xnumel, XBLOCK: tl.constexpr):\n         inout2 = inout1.clone()\n \n         stream0 = get_cuda_stream(0)\n-        kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)\n-        kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)\n+        kernel.run(inout1, in0, xnumel, stream=stream0)\n+        kernel.run(inout2, in0, xnumel, stream=stream0)\n \n         assert same(\n             inout1, inout2, tol=0.001, equal_nan=True"
-        },
-        {
-          "file": "test/inductor/test_max_autotune.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -53,7 +53,7 @@ def _get_func_call() -> str:\n \n \n def _get_kernel_launch() -> str:\n-    return \"launchKernel(\" if config.cpp_wrapper else \".run(\"\n+    return \"call_triton_\" if config.cpp_wrapper else \".run(\"\n \n \n def benchmark_choice(choice, args, out, expected_out, timings):"
-        },
-        {
-          "file": "test/inductor/test_profiler.py",
-          "additions": 0,
-          "deletions": 3,
-          "patch": "@@ -265,9 +265,6 @@ def check_triton_event(e) -> None:\n             self.assertEqual(args[\"kernel_backend\"], \"triton\", msg=f\"event = {e}\")\n \n             self.assertTrue(\"stream\" in args, msg=f\"event = {e}\")\n-            self.assertTrue(\"grid\" in args, msg=f\"event = {e}\")\n-            self.assertTrue(args[\"grid\"].startswith(\"grid\"), msg=f\"event = {e}\")\n-\n             self.assertTrue(\"kernel_file\" in args, msg=f\"event = {e}\")\n             kernel_file = args[\"kernel_file\"]\n             self.assertTrue(os.path.isfile(kernel_file), msg=f\"event = {e}\")"
-        },
-        {
-          "file": "test/inductor/test_select_algorithm.py",
-          "additions": 0,
-          "deletions": 1,
-          "patch": "@@ -353,7 +353,6 @@ def test_TritonTemplateCaller_str(self):\n             module_path=module_path,\n             module_cache_key=None,\n             kernel_name=None,\n-            grid=None,\n             extra_args=None,\n             num_stages=None,\n             num_warps=None,"
-        },
-        {
-          "file": "test/inductor/test_torchinductor.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -3985,7 +3985,7 @@ def foo(m, inp):\n             _, code = run_and_get_code(foo, grouped_conv, input_tensor)\n             # no to channels last permuting before kernel\n             if config.cpp_wrapper:\n-                FileCheck().check_not(\"launchKernel(triton\").check(\"_convolution(\").run(\n+                FileCheck().check_not(\"  call_triton\").check(\"_convolution(\").run(\n                     code[0]\n                 )\n             else:"
-        },
-        {
-          "file": "test/inductor/test_triton_kernels.py",
-          "additions": 4,
-          "deletions": 2,
-          "patch": "@@ -3635,8 +3635,10 @@ def grid(META):\n         output = \"\\n\".join(record.getMessage() for record in log.records)\n         # correct grid example values updated per block size\n         FileCheck().check(\"Compile-time auto-tuning block:\").check(\n-            \"grid_wrapper_for_op_zeros_0\"\n-        ).check_next(\"return (256\").check_next(\"return (64\").run(output)\n+            \"PrecomputedGrid\"\n+        ).check(\"(31 + _launcher_s0) // 32\").check(\"(127 + _launcher_s0) // 128\").run(\n+            output\n+        )\n \n     # Triton 3.2.0 adds the required flags to the Autotuner object for this test\n     # PR: https://github.com/triton-lang/triton/pull/5092"
-        },
-        {
-          "file": "torch/_inductor/autotune_process.py",
-          "additions": 2,
-          "deletions": 7,
-          "patch": "@@ -639,7 +639,6 @@ def __init__(\n         extra_args: Iterable[Any],\n         module_path: str,  # the path of the module defining the triton kernel\n         module_cache_key: str,\n-        grid: list[int],\n         num_stages: int,\n         num_warps: int,\n         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.\n@@ -648,7 +647,6 @@ def __init__(\n         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)\n         self.module_path = module_path\n         self.module_cache_key = module_cache_key\n-        self.grid = grid\n         self.num_stages = num_stages\n         self.num_warps = num_warps\n         self.matrix_instr_nonkdim = matrix_instr_nonkdim\n@@ -700,16 +698,15 @@ def run_with_workspace():\n                 )\n \n                 # Handle zero initialization if needed\n-                if workspace_arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:\n+                if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:\n                     workspace_tensor.zero_()\n \n                 # Run the kernel with workspace\n                 run_method(\n                     *input_tensors,\n                     output_tensor,\n-                    *extra_args,\n                     workspace_tensor,\n-                    grid=self.grid,\n+                    *extra_args,\n                     **warmup_arg,\n                     stream=stream,\n                     benchmark_run=True,\n@@ -725,7 +722,6 @@ def run_with_workspace():\n                 *input_tensors,\n                 output_tensor,\n                 *extra_args,\n-                grid=self.grid,\n                 **warmup_arg,\n                 stream=stream,\n             )\n@@ -735,7 +731,6 @@ def run_with_workspace():\n                 *input_tensors,\n                 output_tensor,\n                 *extra_args,\n-                grid=self.grid,\n                 **warmup_arg,\n                 stream=stream,\n                 benchmark_run=True,"
-        },
-        {
-          "file": "torch/_inductor/codecache.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -1358,7 +1358,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:\n \n @clear_on_fresh_inductor_cache\n class CudaKernelParamCache:\n-    cache: dict[str, dict[str, str]] = {}\n+    cache: dict[str, dict[str, Any]] = {}\n     cache_clear = staticmethod(cache.clear)\n \n     @classmethod\n@@ -1376,7 +1376,7 @@ def set(cls, key: str, params: dict[str, str], cubin: str, bin_type: str) -> Non\n         cls.cache[key] = params\n \n     @classmethod\n-    def get(cls, key: str) -> Optional[dict[str, str]]:\n+    def get(cls, key: str) -> Optional[dict[str, Any]]:\n         return cls.cache.get(key, None)\n \n     @classmethod"
-        },
-        {
-          "file": "torch/_inductor/codegen/common.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -1550,7 +1550,7 @@ def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:\n \n     def python_argdefs(\n         self,\n-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:\n+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:\n         arg_defs: list[ArgName] = []\n         call_args: list[str] = []\n         arg_types: list[torch.dtype] = []"
-        },
-        {
-          "file": "torch/_inductor/codegen/cpp.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -5204,7 +5204,7 @@ def codegen_group(self, name=None) -> str:\n     def call_kernel(self, wrapper, kernel_name):\n         _, call_args, arg_types = self.args.cpp_argdefs()\n         wrapper.generate_kernel_call(\n-            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types\n+            kernel_name, call_args, triton=False, arg_types=arg_types\n         )\n \n "
-        },
-        {
-          "file": "torch/_inductor/codegen/cpp_template_kernel.py",
-          "additions": 1,
-          "deletions": 3,
-          "patch": "@@ -118,9 +118,7 @@ def hook():\n     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):\n         wrapper = V.graph.wrapper_code\n         _, call_args, arg_types = self.args.cpp_argdefs()\n-        wrapper.generate_kernel_call(\n-            name, call_args, triton=False, gpu=False, arg_types=arg_types\n-        )\n+        wrapper.generate_kernel_call(name, call_args, triton=False, arg_types=arg_types)\n \n     def dtype(self, node: ir.Buffer) -> str:\n         return DTYPE_TO_CPP[node.get_dtype()]"
-        },
-        {
-          "file": "torch/_inductor/codegen/cuda/cuda_kernel.py",
-          "additions": 0,
-          "deletions": 1,
-          "patch": "@@ -341,7 +341,6 @@ def call_kernel(\n         wrapper.generate_kernel_call(\n             name,\n             call_args,\n-            gpu=True,\n             triton=False,\n             arg_types=arg_types,\n         )"
-        },
-        {
-          "file": "torch/_inductor/codegen/debug_utils.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -251,7 +251,7 @@ def codegen_intermediate_tensor_value_print(\n                 continue\n             if V.graph.cpp_wrapper:\n                 if arg_signatures is not None and isinstance(\n-                    arg_signatures[i], (torch_dtype)\n+                    arg_signatures[i], torch_dtype\n                 ):\n                     # infer from the arg data type (has torch.dtype) to see if it is a tensor type\n                     V.graph.wrapper_code.writeline("
-        },
-        {
-          "file": "torch/_inductor/codegen/halide.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -1633,7 +1633,7 @@ def call_kernel(self, name: str, node=None):\n         wrapper.generate_kernel_call(\n             name,\n             call_args,\n-            gpu=False,  # grid/stream is handled internally in halide\n+            device=current_device,\n             triton=False,\n         )\n "
-        },
-        {
-          "file": "torch/_inductor/codegen/mps.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -569,7 +569,7 @@ def call_kernel(self, name: str, node: Any = None) -> None:\n         wrapper.generate_kernel_call(\n             name,\n             args,\n-            gpu=False,  # TODO: Fix me, MPS does not expose streams now\n+            device=torch.device(\"cpu\"),  # TODO: Fix me, MPS does not expose streams now\n             triton=False,\n         )\n "
-        },
-        {
-          "file": "torch/_inductor/codegen/rocm/rocm_kernel.py",
-          "additions": 0,
-          "deletions": 3,
-          "patch": "@@ -196,12 +196,9 @@ def call_kernel(\n             kernel_args.append(\"nullptr\" if V.graph.cpp_wrapper else \"None\")\n         if V.graph.cpp_wrapper:\n             arg_types.append(\"uint8_t*\")\n-        current_device = V.graph.get_current_device_or_throw()\n         wrapper.generate_kernel_call(\n             name,\n             kernel_args,\n-            device_index=current_device.index,\n-            gpu=True,\n             triton=False,\n             arg_types=arg_types,\n         )"
-        },
-        {
-          "file": "torch/_inductor/codegen/simd.py",
-          "additions": 1,
-          "deletions": 4,
-          "patch": "@@ -1549,13 +1549,10 @@ def codegen_template(\n \n             if config.benchmark_kernel:\n                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9\n-                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)\n-                assert kernel.meta is not None, \"meta is None\"\n-                grid = kernel.grid_fn(*grid_args, kernel.meta)\n                 src_code = (\n                     f\"{kernel.imports_for_benchmark_kernel()}\\n\"\n                     f\"{src_code}\\n\"\n-                    f\"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}\"\n+                    f\"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}\"\n                 )\n \n             if only_gen_src_code:"
-        },
-        {
-          "file": "torch/_inductor/codegen/triton_split_scan.py",
-          "additions": 3,
-          "deletions": 3,
-          "patch": "@@ -11,7 +11,7 @@\n     TritonCSEVariable,\n     TritonKernel,\n )\n-from torch._inductor.runtime.triton_heuristics import split_scan_grid\n+from torch._inductor.runtime.triton_heuristics import SplitScanGrid\n from torch.utils._ordered_set import OrderedSet\n from torch.utils._sympy.functions import CeilDiv\n \n@@ -203,5 +203,5 @@ def scan(self, dtypes, combine_fn, values):\n     def _get_heuristic(self):\n         return \"split_scan\"\n \n-    def _get_grid_fn(self):\n-        return split_scan_grid\n+    def _get_grid_type(self) -> type[SplitScanGrid]:\n+        return SplitScanGrid"
-        },
-        {
-          "file": "torch/_inductor/compile_fx.py",
-          "additions": 5,
-          "deletions": 3,
-          "patch": "@@ -1143,8 +1143,6 @@ def log_graph_runnable() -> str:\n                                     serialized_extern_kernel_nodes,\n                                 )\n \n-                            additional_files = graph.wrapper_code.additional_files\n-\n                             with dynamo_timed(\n                                 \"AotCodeCompiler.compile\", log_pt2_compile_event=True\n                             ):\n@@ -1154,7 +1152,11 @@ def log_graph_runnable() -> str:\n                                     code,\n                                     serialized_extern_kernel_nodes,\n                                     device_type=graph.device_type,\n-                                    additional_files=additional_files,\n+                                    additional_files=[\n+                                        *dict.fromkeys(\n+                                            graph.wrapper_code.additional_files\n+                                        )\n+                                    ],\n                                 )\n                         else:\n                             compiled_fn = graph.compile_to_module().call"
-        },
-        {
-          "file": "torch/_inductor/fx_passes/b2b_gemm.py",
-          "additions": 4,
-          "deletions": 2,
-          "patch": "@@ -27,6 +27,7 @@\n from ..select_algorithm import (\n     autotune_select_algorithm,\n     ExternKernelChoice,\n+    SymbolicGridFn,\n     TritonTemplate,\n     TritonTemplateCaller,\n )\n@@ -38,8 +39,9 @@\n )\n \n \n-def b2b_gemm_grid(M, P, meta):\n-    return (ceildiv(M, meta[\"BLOCK_SIZE_M\"]) * ceildiv(P, meta[\"BLOCK_SIZE_P\"]), 1, 1)\n+@SymbolicGridFn\n+def b2b_gemm_grid(M, P, meta, *, cdiv):\n+    return (cdiv(M, meta[\"BLOCK_SIZE_M\"]) * cdiv(P, meta[\"BLOCK_SIZE_P\"]), 1, 1)\n \n \n b2b_gemm_left_template = TritonTemplate("
-        },
-        {
-          "file": "torch/_inductor/kernel/bmm.py",
-          "additions": 3,
-          "deletions": 2,
-          "patch": "@@ -8,10 +8,10 @@\n from ..select_algorithm import (\n     autotune_select_algorithm,\n     ExternKernelChoice,\n+    SymbolicGridFn,\n     TritonTemplate,\n )\n from ..utils import (\n-    ceildiv as cdiv,\n     use_aten_gemm_kernels,\n     use_ck_gemm_template,\n     use_cpp_bmm_template,\n@@ -33,7 +33,8 @@\n aten = torch.ops.aten\n \n \n-def bmm_grid(b, m, n, meta):\n+@SymbolicGridFn\n+def bmm_grid(b, m, n, meta, *, cdiv):\n     return (cdiv(m, meta[\"BLOCK_M\"]) * cdiv(n, meta[\"BLOCK_N\"]), b, 1)\n \n "
-        },
-        {
-          "file": "torch/_inductor/kernel/flex_decoding.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -12,7 +12,7 @@\n from ..ir import FixedLayout, FlexibleLayout\n from ..lowering import empty, empty_strided, lowerings\n from ..runtime.runtime_utils import is_power_of_2, next_power_of_2\n-from ..select_algorithm import autotune_select_algorithm, TritonTemplate\n+from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate\n from .flex_attention import (\n     compute_forward_block_mn,\n     compute_forward_inner,\n@@ -30,6 +30,7 @@\n prims = torch.ops.prims\n \n \n+@SymbolicGridFn\n def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):\n     \"\"\"How is this kernel parallelized?\n     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)"
-        },
-        {
-          "file": "torch/_inductor/kernel/mm_common.py",
-          "additions": 5,
-          "deletions": 4,
-          "patch": "@@ -8,7 +8,7 @@\n import sympy\n \n import torch\n-from torch._inductor.select_algorithm import realize_inputs\n+from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn\n from torch._inductor.virtualized import V\n from torch.utils._ordered_set import OrderedSet\n \n@@ -17,7 +17,6 @@\n from ..ir import ChoiceCaller, Layout\n from ..runtime.runtime_utils import next_power_of_2\n from ..utils import (\n-    ceildiv as cdiv,\n     get_backend_num_stages,\n     get_num_sms,\n     TMA_DESCRIPTOR_SIZE,\n@@ -442,14 +441,16 @@ def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:\n     return fallback_to_aten\n \n \n-def mm_grid(m, n, meta):\n+@SymbolicGridFn\n+def mm_grid(m, n, meta, *, cdiv):\n     \"\"\"\n     The CUDA grid size for matmul triton templates.\n     \"\"\"\n     return (cdiv(m, meta[\"BLOCK_M\"]) * cdiv(n, meta[\"BLOCK_N\"]), 1, 1)\n \n \n-def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):\n+@SymbolicGridFn\n+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):\n     \"\"\"Defines the grid for persistent kernels.\"\"\"\n     return (\n         min(meta[\"NUM_SMS\"], cdiv(M, meta[\"BLOCK_M\"]) * cdiv(N, meta[\"BLOCK_N\"])),"
-        },
-        {
-          "file": "torch/_inductor/scheduler.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -3863,7 +3863,7 @@ def free_buffers(self) -> None:\n         for name in sorted(\n             self.buffer_names_to_free\n             - V.graph.removed_buffers\n-            - V.graph.wrapper_code.freed\n+            - V.graph.wrapper_code.freed  # type: ignore[has-type]\n         ):\n             if name in self.name_to_buf:\n                 buf = self.name_to_buf[name]\n@@ -4122,7 +4122,7 @@ def _codegen_partition_wrapper(\n         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)\n \n         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)\n-        V.graph.wrapper_code.allocated.update(\n+        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]\n             [node.get_name() for node in signature.output_nodes]\n         )\n "
-        }
-      ]
-    },
-    {
-      "sha": "6e10471966e22cda8ac0cded8a179267880457e0",
-      "message": "[ci] disable cudagraph for tts_angular on dashboard (#148221)\n\ntts_angular with cudagraph is flaky. Its speedup varies from .05 to 1.01. This PR disables cudagraph for tts_angular to avoid the noise. Since tts_angular shows ~1x speedup while other torchbench models show ~2x speedup, skipping tts_angular would wrongly bump the cudagraph speedup. So this PR only disables cudagraph for tts_angular instead of skipping tts_angular.\n\n[Dashboard ](https://github.com/pytorch/pytorch/actions/runs/13597394087)\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148221\nApproved by: https://github.com/eellison",
-      "changes": [
-        {
-          "file": "benchmarks/dynamo/common.py",
-          "additions": 7,
-          "deletions": 0,
-          "patch": "@@ -1824,6 +1824,10 @@ def skip_multiprocess_models(self):\n     def skip_models_due_to_control_flow(self):\n         return set()\n \n+    @property\n+    def disable_cudagraph_models(self):\n+        return set()\n+\n     @property\n     def guard_on_nn_module_models(self):\n         return set()\n@@ -3834,6 +3838,9 @@ def model_iter_fn_and_mark_step(*args, **kwargs):\n         experiment = coverage_experiment\n         output_filename = \"coverage.csv\"\n \n+    if args.only in runner.disable_cudagraph_models:\n+        args.disable_cudagraphs = True\n+\n     if args.inductor or args.backend == \"inductor\" or args.export_aot_inductor:\n         inductor_config.triton.cudagraphs = not args.disable_cudagraphs\n         inductor_config.triton.persistent_reductions = ("
-        },
-        {
-          "file": "benchmarks/dynamo/torchbench.py",
-          "additions": 4,
-          "deletions": 0,
-          "patch": "@@ -145,6 +145,10 @@ def skip_models_for_cuda(self):\n     def skip_models_for_freezing_cuda(self):\n         return self._skip[\"freezing\"][\"cuda\"]\n \n+    @property\n+    def disable_cudagraph_models(self):\n+        return self._config[\"disable_cudagraph\"]\n+\n     @property\n     def skip_models_for_freezing_cpu(self):\n         return self._skip[\"freezing\"][\"cpu\"]"
-        }
-      ]
-    },
-    {
-      "sha": "ce2f680e0009550ef0dc594f375d542662fcb7e5",
-      "message": "[fr] Added protection against missing stack frames in fr (#148203)\n\nSummary: We have quite a while failures due to this unprotected access. https://fburl.com/scuba/ai_rca_debug_tracing/qtnb63qf\n\nTest Plan:\n\nReviewed By: fduwjj\n\nDifferential Revision: D70358287\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148203\nApproved by: https://github.com/fduwjj",
-      "changes": [
-        {
-          "file": "tools/flight_recorder/components/types.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -414,7 +414,7 @@ def __init__(\n         self.input_dtypes = event[\"input_dtypes\"]\n         self.output_dtypes = event[\"output_dtypes\"]\n         self.time_created_ns = event[\"time_created_ns\"]\n-        self.collective_frames = event[\"frames\"]\n+        self.collective_frames = event.get(\"frames\", [])\n         self.is_verbose = os.getenv(\"FR_TRACE_VERBOSE_OUTPUT\", \"0\") == \"1\"\n \n     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:"
-        }
-      ]
-    },
-    {
-      "sha": "1919e0de9aa29f13529542af5e5115396afbaf93",
-      "message": "Revert \"stage 1 of depreate silent fallback of tuning gemm (#147798)\"\n\nThis reverts commit 297c00264e54cfb192f289e23a41775b81cb9cb8.\n\nReverted https://github.com/pytorch/pytorch/pull/147798 on behalf of https://github.com/wdvr due to failing internal builds, discussed with author ([comment](https://github.com/pytorch/pytorch/pull/147798#issuecomment-2692390551))",
+      "sha": "9fddbf34171e19085a5b2b0c8dbfde643fb290c7",
+      "message": "Update the comment (#148726)\n\nDifferential Revision: D70747931\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148726\nApproved by: https://github.com/yf225",
       "changes": [
         {
           "file": "torch/_inductor/config.py",
-          "additions": 0,
-          "deletions": 1,
-          "patch": "@@ -395,7 +395,6 @@ def prologue_fusion_enabled() -> bool:\n     \"TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE\", \"DEFAULT\"\n ).upper()  # type: ignore[assignment]\n \n-# NOTE: This feature is deprecated and will be defauled to False in the future.\n # Whether we fall back to ATen or hard error when no matches are found during autotuning\n autotune_fallback_to_aten = (\n     os.environ.get(\"TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN\", \"1\") == \"1\""
+          "patch": "@@ -303,7 +303,6 @@ def prologue_fusion_enabled() -> bool:\n mixed_mm_choice: Literal[\"default\", \"triton\", \"aten\", \"heuristic\"] = \"heuristic\"\n \n # enable reordering pass for increasing overlap between compute and communication\n-# only use with fsdp\n reorder_for_compute_comm_overlap = False\n \n # passes (in execution order) for increasing overlap between compute and communication"
         }
       ]
     },
     {
-      "sha": "0ff2e6a85a3264438aaec8bfb9c69b679ea835da",
-      "message": "Fix None and equal_to_1 arguments issue in Triton kernel generated by AOTI (#148102)\n\nSummary:\nWhen a Triton kernel has arguments with None values followed by arguments with value 1, AOTI attempts to remove the None arguments and update the indices of the equal_to_1 arguments in triton_meta[\"configs\"]. However, if the same kernel is called multiple times, this optimization process is repeated. Prior to this diff, the indices of equal_to_1 arguments from subsequent calls (second and later) were based on the updated indices from the previous call, resulting in incorrect behavior.\nThis diff aims to localize the updated indices for equal_to_1 arguments within the optimization process of the current call, ensuring accurate and consistent results.\n\nTest Plan:\nUnit Test:\n```\nbuck2 run mode/dev-nosan caffe2/test/inductor:test_aot_inductor -- -r test_triton_kernel_with_none_inputs_and_equal_to_1_arg\n```\n\nDifferential Revision: D69998314\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148102\nApproved by: https://github.com/davidberard98, https://github.com/chenyang78",
+      "sha": "295f2ed4d103017f7e19a7b8263ece606cd629db",
+      "message": "Fix \"invalid application of 'sizeof' to an incomplete type\" (#148854)\n\nFixes with C++23 and constexpr std::unique_ptr\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148854\nApproved by: https://github.com/Skylion007",
       "changes": [
         {
-          "file": "torch/_inductor/ir.py",
-          "additions": 3,
-          "deletions": 0,
-          "patch": "@@ -1,6 +1,7 @@\n from __future__ import annotations\n \n import contextlib\n+import copy\n import dataclasses\n import functools\n import itertools\n@@ -5847,6 +5848,8 @@ def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]\n             if kernel.arg_names.index(kwarg) in kernel.constexprs:\n                 constexpr_indices.append(idx)\n \n+        # Create a copy of triton_meta to avoid modifying the original version.\n+        triton_meta = copy.deepcopy(triton_meta)\n         if not triton_version_uses_attrs_dict():\n             \"\"\"\n             Filter out None args."
+          "file": "torch/_export/serde/schema_check.py",
+          "patch": "@@ -446,9 +446,9 @@ class ForwardRef {{\n \n  public:\n   ForwardRef(): ptr_(std::make_unique<T>()) {{}}\n-  ForwardRef(ForwardRef<T>&&) = default;\n+  ForwardRef(ForwardRef<T>&&);\n   ForwardRef(const ForwardRef<T>& other): ptr_(std::make_unique<T>(*other.ptr_)) {{}}\n-  ForwardRef<T>& operator=(ForwardRef<T>&&) = default;\n+  ForwardRef<T>& operator=(ForwardRef<T>&&);\n   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{\n     ptr_ = std::make_unique<T>(*other.ptr_);\n     return *this;\n@@ -521,6 +521,9 @@ class F64 {{\n {\"\".join(cpp_enum_defs.values())}\n {\"\".join(dict(sorted(cpp_class_defs.items(), key=lambda x: class_ordering[x[0]])).values())}\n {chr(10).join(cpp_json_defs)}\n+\n+template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;\n+template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;\n }} // namespace _export\n }} // namespace torch\n \"\"\""
         }
       ]
     },
     {
-      "sha": "a983b2b11add71d7994c83dcc139c7c88fb2b183",
-      "message": "Revert \"Initial implementation of host memory stats (#147660)\"\n\nThis reverts commit 945e359fc1afe6c0bb6129ed9607b237fa19cd98.\n\nReverted https://github.com/pytorch/pytorch/pull/147660 on behalf of https://github.com/mradmila due to There is an issue with ambiguous definition of Stat structure when different C++ tools are used. Backing out for now. ([comment](https://github.com/pytorch/pytorch/pull/147660#issuecomment-2692346379))",
+      "sha": "00cabd423544875a288e2f3488381c1196d5e4c0",
+      "message": "[Inductor][Windows] add env_var switch to turn all Windows inductor UTs. (#148733)\n\nFor timeout reason, we can't turn on all Windows Inductor UTs in CI: https://github.com/pytorch/pytorch/issues/135927\nAnd without the UTs, we can't ensure Windows inductor quality.\n\nIntel team will do some local test for Windows inductor, but we still need to add a switch to turn on the full Windows inductor UTs.\n\nThe switch is an environment variable:\n```cmd\nset TORCHINDUCTOR_WINDOWS_TESTS=1\n```\nAfter setup this environment variable, we can turn on all Windows inductor UTs, It will not affect to PyTorch CI.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148733\nApproved by: https://github.com/jansel\n\nCo-authored-by: Jason Ansel <jansel@jansel.net>",
       "changes": [
         {
-          "file": "docs/source/conf.py",
-          "additions": 0,
-          "deletions": 4,
-          "patch": "@@ -424,15 +424,11 @@\n     \"memory_snapshot\",\n     \"memory_stats\",\n     \"memory_stats_as_nested_dict\",\n-    \"host_memory_stats\",\n-    \"host_memory_stats_as_nested_dict\",\n     \"memory_summary\",\n     \"reset_accumulated_memory_stats\",\n-    \"reset_accumulated_host_memory_stats\",\n     \"reset_max_memory_allocated\",\n     \"reset_max_memory_cached\",\n     \"reset_peak_memory_stats\",\n-    \"reset_peak_host_memory_stats\",\n     \"set_per_process_memory_fraction\",\n     # torch.cuda.nccl\n     \"all_gather\","
-        },
-        {
-          "file": "torch/_dynamo/trace_rules.py",
-          "additions": 0,
-          "deletions": 7,
-          "patch": "@@ -468,7 +468,6 @@\n         \"torch._C._cuda_getDevice\",\n         \"torch._C._cuda_getDeviceCount\",\n         \"torch._C._cuda_hasPrimaryContext\",\n-        \"torch._C._cuda_hostMemoryStats\",\n         \"torch._C._cuda_init\",\n         \"torch._C._cuda_ipc_collect\",\n         \"torch._C._cuda_isCurrentStreamCapturing\",\n@@ -482,9 +481,7 @@\n         \"torch._C._cuda_record_memory_history_legacy\",\n         \"torch._C._cuda_record_memory_history\",\n         \"torch._C._cuda_releasePool\",\n-        \"torch._C._cuda_resetAccumulatedHostMemoryStats\",\n         \"torch._C._cuda_resetAccumulatedMemoryStats\",\n-        \"torch._C._cuda_resetPeakHostMemoryStats\",\n         \"torch._C._cuda_resetPeakMemoryStats\",\n         \"torch._C._cuda_set_cudnn_benchmark_limit\",\n         \"torch._C._cuda_set_sync_debug_mode\",\n@@ -2549,8 +2546,6 @@\n         \"torch.cuda.memory.empty_cache\",\n         \"torch.cuda.memory.get_allocator_backend\",\n         \"torch.cuda.memory.get_per_process_memory_fraction\",\n-        \"torch.cuda.memory.host_memory_stats_as_nested_dict\",\n-        \"torch.cuda.memory.host_memory_stats\",\n         \"torch.cuda.memory.list_gpu_processes\",\n         \"torch.cuda.memory.max_memory_allocated\",\n         \"torch.cuda.memory.max_memory_cached\",\n@@ -2563,11 +2558,9 @@\n         \"torch.cuda.memory.memory_stats_as_nested_dict\",\n         \"torch.cuda.memory.memory_stats\",\n         \"torch.cuda.memory.memory_summary\",\n-        \"torch.cuda.memory.reset_accumulated_host_memory_stats\",\n         \"torch.cuda.memory.reset_accumulated_memory_stats\",\n         \"torch.cuda.memory.reset_max_memory_allocated\",\n         \"torch.cuda.memory.reset_max_memory_cached\",\n-        \"torch.cuda.memory.reset_peak_host_memory_stats\",\n         \"torch.cuda.memory.reset_peak_memory_stats\",\n         \"torch.cuda.memory.set_per_process_memory_fraction\",\n         \"torch.cuda.nccl._check_sequence_type\","
-        },
-        {
-          "file": "torch/cuda/__init__.py",
-          "additions": 0,
-          "deletions": 4,
-          "patch": "@@ -1760,8 +1760,6 @@ def addmm_kernel_impl(*args, **kwargs):\n     \"graphs\",\n     \"has_half\",\n     \"has_magma\",\n-    \"host_memory_stats\",\n-    \"host_memory_stats_as_nested_dict\",\n     \"init\",\n     \"initial_seed\",\n     \"ipc_collect\",\n@@ -1798,11 +1796,9 @@ def addmm_kernel_impl(*args, **kwargs):\n     \"nvtx\",\n     \"profiler\",\n     \"random\",\n-    \"reset_accumulated_host_memory_stats\",\n     \"reset_accumulated_memory_stats\",\n     \"reset_max_memory_allocated\",\n     \"reset_max_memory_cached\",\n-    \"reset_peak_host_memory_stats\",\n     \"reset_peak_memory_stats\",\n     \"seed\",\n     \"seed_all\","
+          "file": "torch/_dynamo/test_case.py",
+          "patch": "@@ -11,6 +11,7 @@\n import contextlib\n import importlib\n import logging\n+import os\n from typing import Union\n \n import torch\n@@ -35,7 +36,11 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:\n     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:\n         return  # skip testing\n \n-    if not torch.xpu.is_available() and IS_WINDOWS:\n+    if (\n+        not torch.xpu.is_available()\n+        and IS_WINDOWS\n+        and os.environ.get(\"TORCHINDUCTOR_WINDOWS_TESTS\", \"0\") == \"0\"\n+    ):\n         return\n \n     if isinstance(needs, str):"
         }
       ]
     },
     {
-      "sha": "3a0c9f7f9d2c75bdb242266a27607cb79d9af9ee",
-      "message": "[MPS] Fix SDPA crash (#148239)\n\nIf operation is invoked with mask twice it will crash, as mask expansion logic was implemented inside cache creation block, which is executed only once for all shapes\n\nFixes https://github.com/pytorch/pytorch/issues/148194 which is a regression introduced by https://github.com/pytorch/pytorch/pull/147545\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148239\nApproved by: https://github.com/dcci",
+      "sha": "31625b08b8a896de3118e54e1f97be12da90daad",
+      "message": "Add ccode for FloorDiv (#148727)\n\nSummary: Add ccode for FloorDiv\n\nTest Plan: CIs\n\nDifferential Revision: D70749021\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148727\nApproved by: https://github.com/bobrenjc93",
       "changes": [
         {
-          "file": "test/test_mps.py",
-          "additions": 2,
-          "deletions": 0,
-          "patch": "@@ -9795,6 +9795,8 @@ def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int =\n \n     def test_sdpa_mask_fp32(self):\n         self._test_sdpa_mask(torch.float32)\n+        # Test twice to catch https://github.com/pytorch/pytorch/issues/148194\n+        self._test_sdpa_mask(torch.float32)\n \n     def test_sdpa_mask_fp16(self):\n         self._test_sdpa_mask(torch.float16)"
+          "file": "torch/utils/_sympy/functions.py",
+          "patch": "@@ -291,6 +291,11 @@ def eval(\n \n         return None\n \n+    def _ccode(self, printer):\n+        base = printer.parenthesize(self.base, PRECEDENCE[\"Atom\"] - 0.5)\n+        divisor = printer.parenthesize(self.divisor, PRECEDENCE[\"Atom\"] - 0.5)\n+        return f\"floor({base}/{divisor})\"\n+\n \n class ModularIndexing(sympy.Function):\n     \"\"\""
         }
       ]
     },
     {
-      "sha": "735d7b1af69a17b5ad16bfafa746ef2679ec5877",
-      "message": "[EZ][BE] Increase tolerances for interpolate op (#148224)\n\nNot sure why tolerances were set like that, this logic was added in https://github.com/pytorch/pytorch/pull/104181 without much explanation\nBut if I'm to make a guess, it's likely due to the inaccuracy of bilinear op, that has since been replaced by shader\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148224\nApproved by: https://github.com/Skylion007, https://github.com/dcci\nghstack dependencies: #148154, #148187, #148211",
+      "sha": "2068235c0addeadddb699b62c294dbbd33e24d51",
+      "message": "Add timm_efficientnet to flaky models after cuda 12.6 update in CI/CD (#148788)\n\nAfter https://github.com/pytorch/pytorch/pull/148612\nThis model have become flaky\n\nTracking this regression in an issue : https://github.com/pytorch/pytorch/issues/148699\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148788\nApproved by: https://github.com/izaitsevfb, https://github.com/malfet",
       "changes": [
         {
-          "file": "test/test_mps.py",
-          "additions": 0,
-          "deletions": 2,
-          "patch": "@@ -12510,8 +12510,6 @@ def _compute_tolerances(self, op, dtype):\n             # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.\n             # fixed in macOS 13.3+\n             return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)\n-        if op.name == \"nn.functional.interpolate\":\n-            return (1e-3, 1e-4)\n         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:\n             # TODO: Investigate why this is needed\n             # See https://github.com/pytorch/pytorch/issues/120237"
+          "file": "benchmarks/dynamo/check_accuracy.py",
+          "patch": "@@ -12,6 +12,7 @@\n     \"yolov3\",\n     \"gluon_inception_v3\",\n     \"detectron2_maskrcnn_r_101_c4\",\n+    \"timm_efficientnet\",  # see https://github.com/pytorch/pytorch/issues/148699\n     \"XGLMForCausalLM\",  # discovered in https://github.com/pytorch/pytorch/pull/128148\n }\n "
         }
       ]
     },
     {
-      "sha": "762724f3d08791acd18e77e430a20a8c62d3b145",
-      "message": "[Break XPU][Inductor] Generalize device-bias code and fix test_graph_partition for XPU (#148178)\n\nThis PR generalized the device-bias code introduced by #147038 . And align the behavior between XPU and CUDA on add + mm + pointwise pattern (for XPU, from addmm + pointwise to mm + fused_add_pointwise) , which fix the failed test case `test_graph_partiton` on XPU.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148178\nApproved by: https://github.com/benjaminglass1, https://github.com/jansel, https://github.com/EikanWang\nghstack dependencies: #148155",
+      "sha": "ea86b8d3154d6c5b612f19de671092b1ff70d6b9",
+      "message": "Fix redistribution cost for all-reduce (#148761)\n\nThis issue seems to have been introduced in https://github.com/pytorch/pytorch/pull/119897. With the current implementation, it might be more favorable to perform a reduce_scatter followed by an all-gather than simply an all-reduce.\n\nThanks @lw for the helpful discussions on getting this PR out!\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148761\nApproved by: https://github.com/Skylion007, https://github.com/lw, https://github.com/tianyu-l, https://github.com/fegin",
       "changes": [
         {
-          "file": "test/inductor/test_kernel_benchmark.py",
-          "additions": 0,
-          "deletions": 6,
-          "patch": "@@ -362,12 +362,6 @@ def f(a, b, c):\n         # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9\n         #        = 0.008\n         num_gb = \"0.008\"\n-        if GPU_TYPE == \"xpu\":\n-            # In XPU backend, mm + add + add will be fused as admm + add\n-            # And CUDA prefer not fuse add + mm, please check in function\n-            # `should_prefer_unfused_addmm` in torch/_inductor/fx_passes/post_grad.py\n-            num_gb = \"0.006\"\n-\n         self.check_bandwidth(compiled_module, num_gb)\n \n     def test_mm_slice_add_bandwidth_computation_2(self):"
-        },
-        {
-          "file": "test/inductor/test_pattern_matcher.py",
-          "additions": 0,
-          "deletions": 1,
-          "patch": "@@ -1127,7 +1127,6 @@ def fn(a, b):\n         self.assertIn(\"return (buf0, )\", code[0])\n         self.assertNotIn(\"async_compile.cpp\", code[0])\n \n-    @expectedFailureXPU\n     def test_unfuse_bias_addmm(self):\n         args = [\n             torch.randn(20, device=GPU_TYPE),"
-        },
-        {
-          "file": "torch/_inductor/fx_passes/post_grad.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -44,7 +44,7 @@\n     register_graph_pattern,\n     stable_topological_sort,\n )\n-from ..utils import decode_device, get_gpu_type, is_pointwise_use\n+from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use\n from ..virtualized import V\n from .b2b_gemm import B2B_GEMM_PASS\n from .ddp_fusion import fuse_ddp_communication\n@@ -888,7 +888,7 @@ def view_to_reshape(gm):\n \n def should_prefer_unfused_addmm(match):\n     inp = match.kwargs[\"inp\"]\n-    if not inp.meta[\"val\"].is_cuda:\n+    if not is_gpu(inp.meta[\"val\"].device.type):\n         return False\n \n     output = match.output_node()"
-        }
-      ]
-    },
-    {
-      "sha": "ab78bf5c66d7d20685585ec18ed0d7496c381e2c",
-      "message": "[Break XPU][Inductor UT] Avoid custom op registration conflicts in test_auto_functionalize.py. (#148155)\n\nFix #148148\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148155\nApproved by: https://github.com/jansel, https://github.com/EikanWang",
-      "changes": [
-        {
-          "file": "test/inductor/test_auto_functionalize.py",
-          "additions": 3,
-          "deletions": 1,
-          "patch": "@@ -1708,7 +1708,9 @@ def func(x):\n             self.assertNotEqual(id(output), id(input))\n \n     def test_inference_mode_view(self):\n-        @torch.library.custom_op(\"mylib::foo\", mutates_args={\"workspace\"})\n+        @torch.library.custom_op(\n+            \"test_inference_mode_view::foo\", mutates_args={\"workspace\"}\n+        )\n         def foo(x: torch.Tensor, workspace: torch.Tensor) -> torch.Tensor:\n             return x.clone()\n "
-        }
-      ]
-    },
-    {
-      "sha": "fd16311e7fd3112638d09920296b278af328d44b",
-      "message": "[inductor][subgraph] Plumbing to get ShapeAsConstantBuffer from subgraph to main graph output (#147559)\n\nI am unable to create a test case that fails without the next PR. The idea is to have a symint which is returned by the inner subgraph and then returned by the forward graph after partitioning.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/147559\nApproved by: https://github.com/eellison",
-      "changes": [
-        {
-          "file": "torch/_inductor/graph.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -1269,6 +1269,7 @@ def output(\n                     sympy.logic.boolalg.Boolean,\n                     int,\n                     ir.EffectfulKernel,\n+                    ir.ShapeAsConstantBuffer,\n                 ),\n             )\n             for x in result"
-        },
-        {
-          "file": "torch/_inductor/ir.py",
-          "additions": 4,
-          "deletions": 1,
-          "patch": "@@ -208,6 +208,7 @@ def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:\n                     Expr,\n                     int,\n                     EffectfulKernel,\n+                    ShapeAsConstantBuffer,\n                 ),\n             ), (\n                 f\"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]\"\n@@ -5166,7 +5167,7 @@ def realize_input(cls, x):  # type: ignore[no-untyped-def]\n             # TODO(jansel): impose layout preference on realized buffer\n             x.realize()\n             return x\n-        if isinstance(x, (NonTensorObj)):\n+        if isinstance(x, (NonTensorObj, ShapeAsConstantBuffer)):\n             return x\n         return cls.copy_input(x)\n \n@@ -7041,6 +7042,8 @@ def __str__(self) -> str:\n class TensorBox(MutableBox):\n     @staticmethod\n     def create(data):  # type: ignore[no-untyped-def]\n+        if isinstance(data, ShapeAsConstantBuffer):\n+            return data\n         return TensorBox(StorageBox(data))\n \n "
-        }
-      ]
-    },
-    {
-      "sha": "c87097e74a2da24078cee166fcebbab70cbadf77",
-      "message": "[triton 3.3] Fix inductor/test_profiler.py test (#148230)\n\ntest_inductor_profiling_kernel_names_pointwise is checking that the profiler correctly records the input shapes to the kernel. After triton 3.3, we get a different number of args (because the constexpr args are passed in, from the python perspective). This just patches the test to pass in either case.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148230\nApproved by: https://github.com/drisspg, https://github.com/YUNQIUGUO",
-      "changes": [
-        {
-          "file": "test/inductor/test_profiler.py",
-          "additions": 5,
-          "deletions": 1,
-          "patch": "@@ -102,7 +102,11 @@ def fn(x, y):\n         for event in events:\n             if event.name == \"triton_poi_fused_add_cos_sin_0\":\n                 event_found = True\n-                self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4], []])\n+                # Note: depending on the triton version, we might get 4 or 5 args\n+                # (including / not including the constexpr args). The last two are\n+                # both empty args, so we just truncate the event.input_shapes to the\n+                # first 4.\n+                self.assertEqual(event.input_shapes[:4], [[4, 4], [4, 4], [4, 4], []])\n         self.assertTrue(event_found)\n \n     @unittest.skipIf(not HAS_TRITON, \"requires cuda & triton\")"
-        }
-      ]
-    },
-    {
-      "sha": "493cd97af5f24191def1c3d246a1afd28d1082c9",
-      "message": "add skips to test_notifies_oom and test_set_per_process_memory_fraction (#148134)\n\nTests fail in NVIDIA internal CI since we do not support nvml on Jetson, but nvml is required for OOM reporting to work properly, so we are skipping the failing tests for now.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148134\nApproved by: https://github.com/eqy",
-      "changes": [
-        {
-          "file": "test/test_cuda.py",
-          "additions": 6,
-          "deletions": 0,
-          "patch": "@@ -432,6 +432,9 @@ def test_out_of_memory_retry(self):\n         torch.cuda.reset_peak_memory_stats()\n \n     @serialTest()\n+    @unittest.skipIf(\n+        IS_JETSON, \"oom reporting has issues on jetson igx due to partial nvml support\"\n+    )\n     def test_set_per_process_memory_fraction(self):\n         orig = torch.cuda.get_per_process_memory_fraction(0)\n         try:\n@@ -4207,6 +4210,9 @@ def run():\n                 m.record(False, False)\n \n     @unittest.skipIf(TEST_CUDAMALLOCASYNC, \"temporarily disabled\")\n+    @unittest.skipIf(\n+        IS_JETSON, \"oom reporting has issues on jetson igx due to partial nvml support\"\n+    )\n     def test_notifies_oom(self):\n         x = False\n "
-        }
-      ]
-    },
-    {
-      "sha": "338ed67a1e7aa98dd849f297533c5a71bea4b661",
-      "message": "[inductor] Implement max_pool2d_with_indices as a reduction for large window sizes (#147876)\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/147876\nApproved by: https://github.com/eellison",
-      "changes": [
-        {
-          "file": "test/inductor/test_torchinductor.py",
-          "additions": 1,
-          "deletions": 3,
-          "patch": "@@ -5011,16 +5011,14 @@ def fn(x):\n \n     @skip_if_gpu_halide  # slow\n     def test_max_pool2d6(self):\n-        # Too big kernel size, use fallback\n+        # Big kernel size\n         def fn(x):\n             return aten.max_pool2d_with_indices(x, [13, 13], [])\n \n-        torch._inductor.metrics.generated_kernel_count = 0\n         self.common(\n             fn,\n             (torch.randn([16, 64, 55, 55]),),\n         )\n-        assertGeneratedKernelCountEqual(self, 0)\n \n     # From https://github.com/pytorch/pytorch/issues/94775\n     def test_max_pool2d7(self):"
-        },
-        {
-          "file": "test/inductor/test_torchinductor_codegen_dynamic_shapes.py",
-          "additions": 0,
-          "deletions": 2,
-          "patch": "@@ -140,7 +140,6 @@ def run(*ex, **kwargs):\n     \"test_complex_fallback_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_adaptive_avg_pool2d2_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_adaptive_max_pool2d2_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n-    \"test_adaptive_max_pool2d3_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_fractional_max_pool2d2_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_argmax_to_float_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_avg_pool2d7_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n@@ -175,7 +174,6 @@ def run(*ex, **kwargs):\n     \"test_linspace4_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_logcumsumexp_dynamic_shapes\": TestFailure((\"cpu\",)),\n     \"test_logcumsumexp_zero_dim_dynamic_shapes\": TestFailure((\"cpu\",)),\n-    \"test_max_pool2d6_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_max_pool2d8_dynamic_shapes\": TestFailure((\"cpu\", \"cuda\", \"xpu\")),\n     \"test_max_pool2d_with_indices_backward5_dynamic_shapes\": TestFailure(\n         (\"cpu\", \"cuda\")"
-        },
-        {
-          "file": "torch/_inductor/ir.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -1855,7 +1855,7 @@ def inner_fn(idx: Sequence[Expr]) -> OpsValue:\n         #         device,\n         #         dst_dtype,\n         #         cls._unroll_reduction_fn(\n-        #             inner_fn, reduction_ranges, reduction_type, src_dtype\n+        #             inner_fn, reduction_ranges, reduction_type, src_dtype,\n         #         ),\n         #         ranges,\n         #     )"
-        }
-      ]
-    },
-    {
-      "sha": "83fb974b5d1ec8c31f2da7e9c5e4794ff8d767a4",
-      "message": "scriptfunction: Make sure we have valid __name__ and __qualname__ (#147906)\n\n    It's not fully clear why these are not being created, but you can definitely\n    reproduce this in code. `__name__` is fun, since there appears to be no way to\n    explicitly set it on the pybind11 layer or c++ layer. I've set this in the\n    python wrapper code (which works correctly). But let me know if people feel\n    strongly and want us to go explicitly cast to python within the cpp functions\n    and set it there.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/147906\nApproved by: https://github.com/jansel\nghstack dependencies: #147894",
-      "changes": [
-        {
-          "file": "test/test_jit.py",
-          "additions": 7,
-          "deletions": 0,
-          "patch": "@@ -458,6 +458,13 @@ def fn(x: torch.Tensor) -> torch.Tensor:\n \n             pkl_fn = pickle.dumps(fn, protocol=0)\n \n+    def test_script_fn_valid_name(self):\n+        @torch.jit.script\n+        def fn(x: torch.Tensor) -> torch.Tensor:\n+            return x\n+        self.assertIsNotNone(fn.__name__)\n+        self.assertIsNotNone(fn.__qualname__)\n+\n     def test_restore_device(self):\n         class M(torch.jit.ScriptModule):\n             def __init__(self, cpu_device_str):"
-        },
-        {
-          "file": "torch/jit/_script.py",
-          "additions": 4,
-          "deletions": 0,
-          "patch": "@@ -63,6 +63,8 @@\n Functionally equivalent to a :class:`ScriptModule`, but represents a single\n function and does not have any attributes or Parameters.\n \"\"\"\n+ScriptFunction.__name__ = \"ScriptFunction\"\n+ScriptFunction.__qualname__ = \"torch.jit.ScriptFunction\"\n set_module(ScriptFunction, \"torch.jit\")\n \n \n@@ -1214,6 +1216,8 @@ def _script_impl(\n         )\n         # Forward docstrings\n         fn.__doc__ = obj.__doc__\n+        fn.__name__ = \"ScriptFunction\"\n+        fn.__qualname__ = \"torch.jit.ScriptFunction\"\n         # Allow torch.compile() to inline\n         fn._torchdynamo_inline = obj  # type: ignore[attr-defined]\n         _set_jit_function_cache(obj, fn)"
-        }
-      ]
-    },
-    {
-      "sha": "83ec7cdcd4af5f2eca05f47a97d8f9798e396c1a",
-      "message": "Fix recompile reason logging (#148200)\n\nfor the following test case\n\n```\n        @torch.compile(dynamic=False, backend=cnts)\n        def fn(x, y, z):\n            return x * y * z[0]\n\n        fn(1, torch.randn(1), {0: torch.randn(1)})\n        fn(2, torch.randn(2), {0: torch.randn(2)})\n        fn(3, torch.randn(3), {0: torch.randn(3)})\n        fn(4, torch.randn(4), {0: torch.randn(4)})\n        fn(5, torch.randn(5), {0: torch.randn(5)})\n```\n\npreviously we would log\n\n```\n0/0: L['x'] == 1\n0/0: L['x'] == 1\n0/0: L['x'] == 1\n0/0: L['x'] == 1\n```\n\nbut after this change we now log\n\n```\n0/0: L['x'] == 1\n0/1: L['x'] == 2\n0/2: L['x'] == 3\n0/3: L['x'] == 4\n```\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148200\nApproved by: https://github.com/xmfan",
-      "changes": [
-        {
-          "file": "torch/_dynamo/convert_frame.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -945,7 +945,7 @@ def count_args(code: CodeType) -> int:\n         if is_recompilation(cache_size) and frame:\n             reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)\n             recompile_reason = (\n-                \"Unable to find recompilation reasons\" if not reasons else reasons[-1]\n+                \"Unable to find recompilation reasons\" if not reasons else reasons[0]\n             )\n         metrics_context.update_outer({\"recompile_reason\": recompile_reason})\n "
-        }
-      ]
-    },
-    {
-      "sha": "40b3e4a358cc9b977db7501906758fa9db0ac5b7",
-      "message": "[dynamo] expose code execution strategy to python (#148020)\n\n@anijain2305 this can be used to mark a code object to be skipped/run-only (recursively) while tracing.\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148020\nApproved by: https://github.com/jansel",
-      "changes": [
-        {
-          "file": "torch/_dynamo/decorators.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -26,6 +26,7 @@\n     DynamoStance,\n     innermost_fn,\n     RunOnlyContext,\n+    skip_code,\n )\n from .exc import IncorrectUsage\n from .external_utils import is_compiling\n@@ -39,7 +40,6 @@\n         reset_code,\n         set_eval_frame,\n         set_guard_error_hook,\n-        skip_code,\n         unsupported,\n     )\n "
-        },
-        {
-          "file": "torch/_dynamo/eval_frame.py",
-          "additions": 8,
-          "deletions": 1,
-          "patch": "@@ -56,10 +56,10 @@\n # see discussion at https://github.com/pytorch/pytorch/issues/120699\n from torch._C._dynamo.eval_frame import (  # noqa: F401\n     reset_code,\n+    set_code_exec_strategy,\n     set_eval_frame,\n     set_guard_error_hook,\n     set_skip_guard_eval_unsafe,\n-    skip_code,\n     unsupported,\n )\n from torch._dispatch.python import enable_python_dispatcher\n@@ -86,6 +86,7 @@\n from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType\n from .hooks import Hooks\n from .mutation_guard import install_generation_tagging_init\n+from .types import FrameAction, FrameExecStrategy\n from .utils import common_constant_types, compile_times\n \n \n@@ -1886,3 +1887,9 @@ def inner_fn(*args, **kwargs):\n             return fn(*args, **kwargs)\n \n         return inner_fn\n+\n+\n+def skip_code(code: types.CodeType):\n+    set_code_exec_strategy(\n+        code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)\n+    )"
-        },
-        {
-          "file": "torch/_dynamo/variables/functions.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -527,7 +527,7 @@ def next_variable(self, tx):\n             # test/dynamo/test_misc.py::test_iterator_limit\n             raise\n         except Unsupported as e:\n-            torch._C._dynamo.eval_frame.skip_code(self.get_code())\n+            torch._dynamo.eval_frame.skip_code(self.get_code())\n             raise SkipFrame from e\n         finally:\n             counters[\"unimplemented\"] |= counters[\"inline_call\"]"
-        }
-      ]
-    },
-    {
-      "sha": "e74fdbe6d086d0b2f0ebfddd1a3bf4d19495a830",
-      "message": "[inductor] ignore block ptr advancements for removed buffers (#148087)\n\nFollow up to https://github.com/pytorch/pytorch/pull/147193. Some buffers are removed only when the kernel context is exited so defer the lines instead.\n\nAdded `use_block_ptr` as a parameter to test case that fails if run with block ptrs enabled.\n\nFixes #ISSUE_NUMBER\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148087\nApproved by: https://github.com/jansel, https://github.com/eellison",
-      "changes": [
-        {
-          "file": "torch/_inductor/codegen/triton.py",
-          "additions": 4,
-          "deletions": 4,
-          "patch": "@@ -74,7 +74,6 @@\n     DeferredLine,\n     IndentedBuffer,\n     InplacedBuffer,\n-    is_buffer_removed,\n     OpOverrides,\n     PythonPrinter,\n     RemovedArg,\n@@ -3142,8 +3141,6 @@ def codegen_body(self):\n                     for block_ptr, advancement in self.pointer_advancements[\n                         tree.symt\n                     ].items():\n-                        if is_buffer_removed(self.block_ptr_to_buffer[block_ptr]):\n-                            continue\n                         # Subtract any advancements made in the previous loop level.\n                         if level < len(loop_trees) - 1:\n                             prev_tree = loop_trees[level + 1]\n@@ -3158,7 +3155,10 @@ def codegen_body(self):\n                             ]\n \n                         self.body.writeline(\n-                            f\"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})\"\n+                            DeferredLine(\n+                                self.block_ptr_to_buffer[block_ptr],\n+                                f\"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})\",\n+                            )\n                         )\n \n                 # Invalidate any cache entries that came from inside the loop."
-        }
-      ]
-    },
-    {
-      "sha": "4995e058bf6c12ec5f253a5a3e3ceed867dc013c",
-      "message": "[user-triton] handle inline_asm_case (#148043)\n\nSummary: We currently failed the mutation analysis for all inline_asm ops. In this diff, we handle the case when \"is_pure\" is set to True since it indicates the operation doesn't mutate the input value\n\nTest Plan:\n../buck-out/v2/gen/fbcode/854b9ed00d28c5c5/caffe2/test/inductor/__triton_kernels__/triton_kernels.par --r test_mutations_inline_asm_kernel\n\n```\ntest_mutations_inline_asm_kernel_is_pure_true (caffe2.test.inductor.test_triton_kernels.MutationTests) ... W0226 18:10:34.261000 1906801 /data/users/sijiac/fbsource/fbcode/caffe2/torch/_higher_order_ops/triton_kernel_wrap.py:656] TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)\nok\n\n----------------------------------------------------------------------\nRan 2 tests in 0.706s\n\nOK\n```\n\nDifferential Revision: D69878591\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/148043\nApproved by: https://github.com/zou3519",
-      "changes": [
-        {
-          "file": "test/inductor/test_triton_kernels.py",
-          "additions": 6,
-          "deletions": 2,
-          "patch": "@@ -3127,9 +3127,13 @@ def branch_with_multiple_yield_args(\n             {\"ptr\": t, \"n_elements\": 4, \"BLOCK_SIZE\": 4},\n             [\"ptr\"],\n         ],\n-        # Cant optimize since the kernel contains a tl.inline_asm_elementwise\n         [\n-            inline_asm_kernel,\n+            inline_asm_kernel_is_pure_true,\n+            {\"X\": t, \"Y\": t, \"Z\": t, \"n\": 4, \"BLOCK\": 4},\n+            [\"Z\"],\n+        ],\n+        [\n+            inline_asm_kernel_is_pure_false,\n             {\"X\": t, \"Y\": t, \"Z\": t, \"n\": 4, \"BLOCK\": 4},\n             [\"X\", \"Y\", \"Z\"],\n         ],"
+          "file": "torch/distributed/tensor/_collective_utils.py",
+          "patch": "@@ -297,7 +297,7 @@ def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f\n     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]\n     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]\n     # allreduce have almost 2x comm bytes compare to allgather/reduce_scatter\n-    num_hops = 2 * num_devices_on_mesh_dim - 1\n+    num_hops = 2 * (num_devices_on_mesh_dim - 1)\n \n     latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]\n     bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth"
         }
       ]
     }

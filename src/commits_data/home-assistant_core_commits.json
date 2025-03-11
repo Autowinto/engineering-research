@@ -2,368 +2,42 @@
   "repo_name": "home-assistant/core",
   "commits": [
     {
-      "sha": "53bc5ff029631331e041b5f93f0823e98ef9f1f6",
-      "message": "Keep entered values in form when connecting to Epson projector fails (#135402)\n\nAdd suggested values to form",
+      "sha": "ed20947e30b25c50af47dc338ed9686c9eace346",
+      "message": "Fix events without user in Bring integration (#140213)\n\nFix events without publicUserUuid",
       "changes": [
         {
-          "file": "homeassistant/components/epson/config_flow.py",
-          "additions": 3,
-          "deletions": 1,
-          "patch": "@@ -72,5 +72,7 @@ async def async_step_user(\n                 if projector:\n                     projector.close()\n         return self.async_show_form(\n-            step_id=\"user\", data_schema=DATA_SCHEMA, errors=errors\n+            step_id=\"user\",\n+            data_schema=self.add_suggested_values_to_schema(DATA_SCHEMA, user_input),\n+            errors=errors,\n         )"
+          "file": "homeassistant/components/bring/event.py",
+          "patch": "@@ -77,9 +77,12 @@ def _async_handle_event(self) -> None:\n             attributes = asdict(activity.content)\n \n             attributes[\"last_activity_by\"] = next(\n-                x.name\n-                for x in bring_list.users.users\n-                if x.publicUuid == activity.content.publicUserUuid\n+                (\n+                    x.name\n+                    for x in bring_list.users.users\n+                    if x.publicUuid == activity.content.publicUserUuid\n+                ),\n+                None,\n             )\n \n             self._trigger_event("
         }
       ]
     },
     {
-      "sha": "23644a60ac7dd42dfcab85d5de6624b014e20df2",
-      "message": "Improve Linkplay device unavailability detection  (#138457)\n\n* Dampen reachability changes\n\nRetry a few times before declaring player is unavailable\n\n* Fix ruff-format complaint\n\nCo-authored-by: Simon Lamon <32477463+silamon@users.noreply.github.com>\n\n* Fix ruff-format complaint\n\nCo-authored-by: Simon Lamon <32477463+silamon@users.noreply.github.com>\n\n* Fix ruff-format complaint\n\nCo-authored-by: Simon Lamon <32477463+silamon@users.noreply.github.com>\n\n* Fix duplicated change\n\nCo-authored-by: Simon Lamon <32477463+silamon@users.noreply.github.com>\n\n---------\n\nCo-authored-by: Simon Lamon <32477463+silamon@users.noreply.github.com>",
+      "sha": "a3e981f1489b1b9ce9f526cc5e985e50a313d34e",
+      "message": "Fix version not always available in onewire (#140260)",
       "changes": [
         {
-          "file": "homeassistant/components/linkplay/media_player.py",
-          "additions": 7,
-          "deletions": 1,
-          "patch": "@@ -125,6 +125,8 @@\n     }\n )\n \n+RETRY_POLL_MAXIMUM = 3\n+\n \n async def async_setup_entry(\n     hass: HomeAssistant,\n@@ -156,6 +158,7 @@ def __init__(self, bridge: LinkPlayBridge) -> None:\n \n         super().__init__(bridge)\n         self._attr_unique_id = bridge.device.uuid\n+        self._retry_count = 0\n \n         self._attr_source_list = [\n             SOURCE_MAP[playing_mode] for playing_mode in bridge.device.playmode_support\n@@ -166,9 +169,12 @@ async def async_update(self) -> None:\n         \"\"\"Update the state of the media player.\"\"\"\n         try:\n             await self._bridge.player.update_status()\n+            self._retry_count = 0\n             self._update_properties()\n         except LinkPlayRequestException:\n-            self._attr_available = False\n+            self._retry_count += 1\n+            if self._retry_count >= RETRY_POLL_MAXIMUM:\n+                self._attr_available = False\n \n     @exception_wrap\n     async def async_select_source(self, source: str) -> None:"
+          "file": "homeassistant/components/onewire/onewirehub.py",
+          "patch": "@@ -2,6 +2,7 @@\n \n from __future__ import annotations\n \n+import contextlib\n from datetime import datetime, timedelta\n import logging\n import os\n@@ -58,7 +59,7 @@ class OneWireHub:\n \n     owproxy: protocol._Proxy\n     devices: list[OWDeviceDescription]\n-    _version: str\n+    _version: str | None = None\n \n     def __init__(self, hass: HomeAssistant, config_entry: OneWireConfigEntry) -> None:\n         \"\"\"Initialize.\"\"\"\n@@ -74,7 +75,9 @@ def _initialize(self) -> None:\n         port = self._config_entry.data[CONF_PORT]\n         _LOGGER.debug(\"Initializing connection to %s:%s\", host, port)\n         self.owproxy = protocol.proxy(host, port)\n-        self._version = self.owproxy.read(protocol.PTH_VERSION).decode()\n+        with contextlib.suppress(protocol.OwnetError):\n+            # Version is not available on all servers\n+            self._version = self.owproxy.read(protocol.PTH_VERSION).decode()\n         self.devices = _discover_devices(self.owproxy)\n \n     async def initialize(self) -> None:"
         }
       ]
     },
     {
-      "sha": "8536f2b4cbcceb6c4bd4def6d37d26e5181b74fa",
-      "message": "Fix vicare exception for specific ventilation device type (#138343)\n\n* fix for exception for specific ventilation device type + tests\n\n* fix for exception for specific ventilation device type + tests\n\n* New Testset just for fan\n\n* update test_sensor.ambr",
+      "sha": "7cbcdbe6104136b9ba81adfefa934c1e33104f84",
+      "message": "Log broad exception in Electricity Maps config flow (#140219)",
       "changes": [
         {
-          "file": "homeassistant/components/vicare/fan.py",
-          "additions": 8,
-          "deletions": 2,
-          "patch": "@@ -196,7 +196,10 @@ def update(self) -> None:\n     @property\n     def is_on(self) -> bool | None:\n         \"\"\"Return true if the entity is on.\"\"\"\n-        if self._api.getVentilationQuickmode(VentilationQuickmode.STANDBY):\n+        if (\n+            self._attr_supported_features & FanEntityFeature.TURN_OFF\n+            and self._api.getVentilationQuickmode(VentilationQuickmode.STANDBY)\n+        ):\n             return False\n \n         return self.percentage is not None and self.percentage > 0\n@@ -209,7 +212,10 @@ def turn_off(self, **kwargs: Any) -> None:\n     @property\n     def icon(self) -> str | None:\n         \"\"\"Return the icon to use in the frontend.\"\"\"\n-        if self._api.getVentilationQuickmode(VentilationQuickmode.STANDBY):\n+        if (\n+            self._attr_supported_features & FanEntityFeature.TURN_OFF\n+            and self._api.getVentilationQuickmode(VentilationQuickmode.STANDBY)\n+        ):\n             return \"mdi:fan-off\"\n         if hasattr(self, \"_attr_preset_mode\"):\n             if self._attr_preset_mode == VentilationMode.VENTILATION:"
-        },
-        {
-          "file": "tests/components/vicare/test_climate.py",
-          "additions": 3,
-          "deletions": 1,
-          "patch": "@@ -23,7 +23,9 @@ async def test_all_entities(\n     entity_registry: er.EntityRegistry,\n ) -> None:\n     \"\"\"Test all entities.\"\"\"\n-    fixtures: list[Fixture] = [Fixture({\"type:boiler\"}, \"vicare/Vitodens300W.json\")]\n+    fixtures: list[Fixture] = [\n+        Fixture({\"type:boiler\"}, \"vicare/Vitodens300W.json\"),\n+    ]\n     with (\n         patch(f\"{MODULE}.login\", return_value=MockPyViCare(fixtures)),\n         patch(f\"{MODULE}.PLATFORMS\", [Platform.CLIMATE]),"
-        },
-        {
-          "file": "tests/components/vicare/test_fan.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -26,6 +26,7 @@ async def test_all_entities(\n     fixtures: list[Fixture] = [\n         Fixture({\"type:ventilation\"}, \"vicare/ViAir300F.json\"),\n         Fixture({\"type:ventilation\"}, \"vicare/VitoPure.json\"),\n+        Fixture({\"type:heatpump\"}, \"vicare/Vitocal222G_Vitovent300W.json\"),\n     ]\n     with (\n         patch(f\"{MODULE}.login\", return_value=MockPyViCare(fixtures)),"
+          "file": "homeassistant/components/co2signal/config_flow.py",
+          "patch": "@@ -3,11 +3,11 @@\n from __future__ import annotations\n \n from collections.abc import Mapping\n+import logging\n from typing import Any\n \n from aioelectricitymaps import (\n     ElectricityMaps,\n-    ElectricityMapsError,\n     ElectricityMapsInvalidTokenError,\n     ElectricityMapsNoDataError,\n )\n@@ -36,6 +36,8 @@\n TYPE_SPECIFY_COORDINATES = \"specify_coordinates\"\n TYPE_SPECIFY_COUNTRY = \"specify_country_code\"\n \n+_LOGGER = logging.getLogger(__name__)\n+\n \n class ElectricityMapsConfigFlow(ConfigFlow, domain=DOMAIN):\n     \"\"\"Handle a config flow for Co2signal.\"\"\"\n@@ -158,7 +160,8 @@ async def _validate_and_create(\n                 errors[\"base\"] = \"invalid_auth\"\n             except ElectricityMapsNoDataError:\n                 errors[\"base\"] = \"no_data\"\n-            except ElectricityMapsError:\n+            except Exception:\n+                _LOGGER.exception(\"Unexpected error occurred while checking API key\")\n                 errors[\"base\"] = \"unknown\"\n             else:\n                 if self.source == SOURCE_REAUTH:"
         }
       ]
     },
     {
-      "sha": "fca4ef3b1eb75af770fb5d7e01295930886dbd27",
-      "message": "Fix scope comparison in SmartThings (#139652)",
+      "sha": "aa2a1fc5ef748b827eff6ef2f5797248a348332e",
+      "message": "Fix not available source in Onkyo (#140175)",
       "changes": [
         {
-          "file": "homeassistant/components/smartthings/config_flow.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -34,7 +34,7 @@ def extra_authorize_data(self) -> dict[str, Any]:\n \n     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:\n         \"\"\"Create an entry for SmartThings.\"\"\"\n-        if data[CONF_TOKEN][\"scope\"].split() != SCOPES:\n+        if not set(data[CONF_TOKEN][\"scope\"].split()) >= set(SCOPES):\n             return self.async_abort(reason=\"missing_scopes\")\n         client = SmartThings(session=async_get_clientsession(self.hass))\n         client.authenticate(data[CONF_TOKEN][CONF_ACCESS_TOKEN])"
-        },
-        {
-          "file": "tests/components/smartthings/test_config_flow.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -261,7 +261,7 @@ async def test_reauthentication(\n             \"expires_in\": 82806,\n             \"scope\": \"r:devices:* w:devices:* x:devices:* r:hubs:* \"\n             \"r:locations:* w:locations:* x:locations:* \"\n-            \"r:scenes:* x:scenes:* r:rules:* w:rules:* sse\",\n+            \"r:scenes:* x:scenes:* r:rules:* sse w:rules:*\",\n             \"access_tier\": 0,\n             \"installed_app_id\": \"5aaaa925-2be1-4e40-b257-e4ef59083324\",\n         },\n@@ -279,7 +279,7 @@ async def test_reauthentication(\n         \"expires_in\": 82806,\n         \"scope\": \"r:devices:* w:devices:* x:devices:* r:hubs:* \"\n         \"r:locations:* w:locations:* x:locations:* \"\n-        \"r:scenes:* x:scenes:* r:rules:* w:rules:* sse\",\n+        \"r:scenes:* x:scenes:* r:rules:* sse w:rules:*\",\n         \"access_tier\": 0,\n         \"installed_app_id\": \"5aaaa925-2be1-4e40-b257-e4ef59083324\",\n     }"
-        }
-      ]
-    },
-    {
-      "sha": "4c8a58f7cc4135ccbb578145615c607fc26fb5ba",
-      "message": "Fix broken link in ESPHome BLE repair (#139639)\n\nESPHome always uses .0 in the URL for the changelog,\nand we never had a patch version in the stable\nBLE version field so we need to switch it to\n.0 for the URL.",
-      "changes": [
-        {
-          "file": "homeassistant/components/esphome/const.py",
-          "additions": 3,
-          "deletions": 1,
-          "patch": "@@ -19,6 +19,8 @@\n PROJECT_URLS = {\n     \"esphome.bluetooth-proxy\": \"https://esphome.github.io/bluetooth-proxies/\",\n }\n-DEFAULT_URL = f\"https://esphome.io/changelog/{STABLE_BLE_VERSION_STR}.html\"\n+# ESPHome always uses .0 for the changelog URL\n+STABLE_BLE_URL_VERSION = f\"{STABLE_BLE_VERSION.major}.{STABLE_BLE_VERSION.minor}.0\"\n+DEFAULT_URL = f\"https://esphome.io/changelog/{STABLE_BLE_URL_VERSION}.html\"\n \n DATA_FFMPEG_PROXY = f\"{DOMAIN}.ffmpeg_proxy\""
-        },
-        {
-          "file": "tests/components/esphome/test_manager.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -29,6 +29,7 @@\n     CONF_DEVICE_NAME,\n     CONF_SUBSCRIBE_LOGS,\n     DOMAIN,\n+    STABLE_BLE_URL_VERSION,\n     STABLE_BLE_VERSION_STR,\n )\n from homeassistant.const import (\n@@ -366,7 +367,7 @@ async def test_esphome_device_with_old_bluetooth(\n     )\n     assert (\n         issue.learn_more_url\n-        == f\"https://esphome.io/changelog/{STABLE_BLE_VERSION_STR}.html\"\n+        == f\"https://esphome.io/changelog/{STABLE_BLE_URL_VERSION}.html\"\n     )\n \n "
-        }
-      ]
-    },
-    {
-      "sha": "c9abe760237c44c7a83d0c52fc3fd602809469cd",
-      "message": "Use multiple indexed group-by queries to get start time states for MySQL (#138786)\n\n* tweaks\n\n* mysql\n\n* mysql\n\n* Update homeassistant/components/recorder/history/modern.py\n\n* Update homeassistant/components/recorder/history/modern.py\n\n* Update homeassistant/components/recorder/const.py\n\n* Update homeassistant/components/recorder/statistics.py\n\n* Apply suggestions from code review\n\n* mysql\n\n* mysql\n\n* cover\n\n* make sure db is fully init on old schema\n\n* fixes\n\n* fixes\n\n* coverage\n\n* coverage\n\n* coverage\n\n* s/slow_dependant_subquery/slow_dependent_subquery/g\n\n* reword\n\n* comment that callers are responsible for staying under the limit\n\n* comment that callers are responsible for staying under the limit\n\n* switch to kwargs\n\n* reduce branching complexity\n\n* split stats query\n\n* preen\n\n* split tests\n\n* split tests",
-      "changes": [
-        {
-          "file": "homeassistant/components/recorder/const.py",
-          "additions": 6,
-          "deletions": 0,
-          "patch": "@@ -30,6 +30,12 @@\n MAX_QUEUE_BACKLOG_MIN_VALUE = 65000\n MIN_AVAILABLE_MEMORY_FOR_QUEUE_BACKLOG = 256 * 1024**2\n \n+# As soon as we have more than 999 ids, split the query as the\n+# MySQL optimizer handles it poorly and will no longer\n+# do an index only scan with a group-by\n+# https://github.com/home-assistant/core/issues/132865#issuecomment-2543160459\n+MAX_IDS_FOR_INDEXED_GROUP_BY = 999\n+\n # The maximum number of rows (events) we purge in one delete statement\n \n DEFAULT_MAX_BIND_VARS = 4000"
-        },
-        {
-          "file": "homeassistant/components/recorder/models/database.py",
-          "additions": 10,
-          "deletions": 0,
-          "patch": "@@ -37,3 +37,13 @@ class DatabaseOptimizer:\n     # https://wiki.postgresql.org/wiki/Loose_indexscan\n     # https://github.com/home-assistant/core/issues/126084\n     slow_range_in_select: bool\n+\n+    # MySQL 8.x+ can end up with a file-sort on a dependent subquery\n+    # which makes the query painfully slow.\n+    # https://github.com/home-assistant/core/issues/137178\n+    # The solution is to use multiple indexed group-by queries instead\n+    # of the subquery as long as the group by does not exceed\n+    # 999 elements since as soon as we hit 1000 elements MySQL\n+    # will no longer use the group_index_range optimization.\n+    # https://github.com/home-assistant/core/issues/132865#issuecomment-2543160459\n+    slow_dependent_subquery: bool"
-        },
-        {
-          "file": "tests/components/history/test_websocket_api_schema_32.py",
-          "additions": 4,
-          "deletions": 2,
-          "patch": "@@ -1,5 +1,7 @@\n \"\"\"The tests the History component websocket_api.\"\"\"\n \n+from collections.abc import Generator\n+\n import pytest\n \n from homeassistant.components import recorder\n@@ -17,9 +19,9 @@\n \n \n @pytest.fixture(autouse=True)\n-def db_schema_32():\n+def db_schema_32(hass: HomeAssistant) -> Generator[None]:\n     \"\"\"Fixture to initialize the db with the old schema 32.\"\"\"\n-    with old_db_schema(\"32\"):\n+    with old_db_schema(hass, \"32\"):\n         yield\n \n "
-        },
-        {
-          "file": "tests/components/recorder/conftest.py",
-          "additions": 7,
-          "deletions": 0,
-          "patch": "@@ -13,6 +13,7 @@\n \n from homeassistant.components import recorder\n from homeassistant.components.recorder import db_schema\n+from homeassistant.components.recorder.const import MAX_IDS_FOR_INDEXED_GROUP_BY\n from homeassistant.components.recorder.util import session_scope\n from homeassistant.core import HomeAssistant\n \n@@ -190,3 +191,9 @@ def _instrument_apply_update(\n         instrumented_migration.live_migration_done_stall.set()\n         instrumented_migration.non_live_migration_done_stall.set()\n         yield instrumented_migration\n+\n+\n+@pytest.fixture(params=[1, 2, MAX_IDS_FOR_INDEXED_GROUP_BY])\n+def ids_for_start_time_chunk_sizes(request: pytest.FixtureRequest) -> int:\n+    \"\"\"Fixture to test different chunk sizes for start time query.\"\"\"\n+    return request.param"
-        },
-        {
-          "file": "tests/components/recorder/test_history_db_schema_32.py",
-          "additions": 3,
-          "deletions": 2,
-          "patch": "@@ -2,6 +2,7 @@\n \n from __future__ import annotations\n \n+from collections.abc import Generator\n from copy import copy\n from datetime import datetime, timedelta\n import json\n@@ -50,9 +51,9 @@ def disable_states_meta_manager():\n \n \n @pytest.fixture(autouse=True)\n-def db_schema_32():\n+def db_schema_32(hass: HomeAssistant) -> Generator[None]:\n     \"\"\"Fixture to initialize the db with the old schema 32.\"\"\"\n-    with old_db_schema(\"32\"):\n+    with old_db_schema(hass, \"32\"):\n         yield\n \n "
-        },
-        {
-          "file": "tests/components/recorder/test_history_db_schema_42.py",
-          "additions": 3,
-          "deletions": 2,
-          "patch": "@@ -2,6 +2,7 @@\n \n from __future__ import annotations\n \n+from collections.abc import Generator\n from copy import copy\n from datetime import datetime, timedelta\n import json\n@@ -42,9 +43,9 @@ async def mock_recorder_before_hass(\n \n \n @pytest.fixture(autouse=True)\n-def db_schema_42():\n+def db_schema_42(hass: HomeAssistant) -> Generator[None]:\n     \"\"\"Fixture to initialize the db with the old schema 42.\"\"\"\n-    with old_db_schema(\"42\"):\n+    with old_db_schema(hass, \"42\"):\n         yield\n \n "
-        },
-        {
-          "file": "tests/components/recorder/test_purge_v32_schema.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -58,9 +58,9 @@ async def mock_recorder_before_hass(\n \n \n @pytest.fixture(autouse=True)\n-def db_schema_32():\n+def db_schema_32(hass: HomeAssistant) -> Generator[None]:\n     \"\"\"Fixture to initialize the db with the old schema 32.\"\"\"\n-    with old_db_schema(\"32\"):\n+    with old_db_schema(hass, \"32\"):\n         yield\n \n "
-        }
-      ]
-    },
-    {
-      "sha": "0c803520a33af3b528756e8b099daeaecc3a957f",
-      "message": "Motion blind type list (#139590)\n\n* Add blind_type_list\n\n* fix\n\n* styling\n\n* fix typing\n\n* Bump motionblinds to 0.6.26",
-      "changes": [
-        {
-          "file": "homeassistant/components/motion_blinds/config_flow.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -156,6 +156,7 @@ async def async_step_connect(\n         errors: dict[str, str] = {}\n         if user_input is not None:\n             key = user_input[CONF_API_KEY]\n+            assert self._host\n \n             connect_gateway_class = ConnectMotionGateway(self.hass)\n             if not await connect_gateway_class.async_connect_gateway(self._host, key):"
-        },
-        {
-          "file": "homeassistant/components/motion_blinds/const.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -8,6 +8,7 @@\n \n PLATFORMS = [Platform.BUTTON, Platform.COVER, Platform.SENSOR]\n \n+CONF_BLIND_TYPE_LIST = \"blind_type_list\"\n CONF_WAIT_FOR_PUSH = \"wait_for_push\"\n CONF_INTERFACE = \"interface\"\n DEFAULT_WAIT_FOR_PUSH = False"
-        },
-        {
-          "file": "homeassistant/components/motion_blinds/gateway.py",
-          "additions": 7,
-          "deletions": 2,
-          "patch": "@@ -42,11 +42,16 @@ def update_gateway(self):\n         for blind in self.gateway_device.device_list.values():\n             blind.Update_from_cache()\n \n-    async def async_connect_gateway(self, host, key):\n+    async def async_connect_gateway(\n+        self,\n+        host: str,\n+        key: str,\n+        blind_type_list: dict[str, int] | None = None,\n+    ) -> bool:\n         \"\"\"Connect to the Motion Gateway.\"\"\"\n         _LOGGER.debug(\"Initializing with host %s (key %s)\", host, key[:3])\n         self._gateway_device = MotionGateway(\n-            ip=host, key=key, multicast=self._multicast\n+            ip=host, key=key, multicast=self._multicast, blind_type_list=blind_type_list\n         )\n         try:\n             # update device info and get the connected sub devices"
-        }
-      ]
-    },
-    {
-      "sha": "0694f9e1648b6025310ffd426ac754dad92bf4a2",
-      "message": "Fix Tuya unsupported Temperature & Humidity Sensors (with or without external probe) (#138542)\n\n* add category qxj for th sensor with external probe. partly fixes #136472\n\n* add TEMP_CURRENT_EXTERNAL for th sensor with external probe. fixes #136472\n\n* ruff format\n\n* add translation_key temperature_external for TEMP_CURRENT_EXTERNAL\n\n---------\n\nCo-authored-by: Franck Nijhof <git@frenck.dev>",
-      "changes": [
-        {
-          "file": "homeassistant/components/tuya/binary_sensor.py",
-          "additions": 3,
-          "deletions": 0,
-          "patch": "@@ -291,6 +291,9 @@ class TuyaBinarySensorEntityDescription(BinarySensorEntityDescription):\n     # Temperature and Humidity Sensor\n     # https://developer.tuya.com/en/docs/iot/categorywsdcg?id=Kaiuz3hinij34\n     \"wsdcg\": (TAMPER_BINARY_SENSOR,),\n+    # Temperature and Humidity Sensor with External Probe\n+    # New undocumented category qxj, see https://github.com/home-assistant/core/issues/136472\n+    \"qxj\": (TAMPER_BINARY_SENSOR,),\n     # Pressure Sensor\n     # https://developer.tuya.com/en/docs/iot/categoryylcg?id=Kaiuz3kc2e4gm\n     \"ylcg\": ("
-        },
-        {
-          "file": "homeassistant/components/tuya/const.py",
-          "additions": 6,
-          "deletions": 0,
-          "patch": "@@ -333,6 +333,12 @@ class DPCode(StrEnum):\n     TEMP_CONTROLLER = \"temp_controller\"\n     TEMP_CURRENT = \"temp_current\"  # Current temperature in \u00b0C\n     TEMP_CURRENT_F = \"temp_current_f\"  # Current temperature in \u00b0F\n+    TEMP_CURRENT_EXTERNAL = (\n+        \"temp_current_external\"  # Current external temperature in Celsius\n+    )\n+    TEMP_CURRENT_EXTERNAL_F = (\n+        \"temp_current_external_f\"  # Current external temperature in Fahrenheit\n+    )\n     TEMP_INDOOR = \"temp_indoor\"  # Indoor temperature in \u00b0C\n     TEMP_SET = \"temp_set\"  # Set the temperature in \u00b0C\n     TEMP_SET_F = \"temp_set_f\"  # Set the temperature in \u00b0F"
-        },
-        {
-          "file": "homeassistant/components/tuya/switch.py",
-          "additions": 9,
-          "deletions": 0,
-          "patch": "@@ -612,6 +612,15 @@\n             device_class=SwitchDeviceClass.OUTLET,\n         ),\n     ),\n+    # SIREN: Siren (switch) with Temperature and Humidity Sensor with External Probe\n+    # New undocumented category qxj, see https://github.com/home-assistant/core/issues/136472\n+    \"qxj\": (\n+        SwitchEntityDescription(\n+            key=DPCode.SWITCH,\n+            translation_key=\"switch\",\n+            device_class=SwitchDeviceClass.OUTLET,\n+        ),\n+    ),\n     # Ceiling Light\n     # https://developer.tuya.com/en/docs/iot/ceiling-light?id=Kaiuz03xxfc4r\n     \"xdd\": ("
-        }
-      ]
-    },
-    {
-      "sha": "5b1f3d3e7f99600a04b374101621c96ee4b14c55",
-      "message": "Fix arm vacation mode showing as armed away in elkm1 (#139613)\n\nAdd native arm vacation mode support to elkm1\n\nVacation mode is currently implemented as a custom\nservice which will be deprecated in a future PR.\n\nNote that the custom service was added long before\nHA had a native vacation mode which was added\nin #45980",
-      "changes": [
-        {
-          "file": "homeassistant/components/elkm1/alarm_control_panel.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -105,6 +105,7 @@ class ElkArea(ElkAttachedEntity, AlarmControlPanelEntity, RestoreEntity):\n         AlarmControlPanelEntityFeature.ARM_HOME\n         | AlarmControlPanelEntityFeature.ARM_AWAY\n         | AlarmControlPanelEntityFeature.ARM_NIGHT\n+        | AlarmControlPanelEntityFeature.ARM_VACATION\n     )\n     _element: Area\n \n@@ -204,7 +205,7 @@ def _element_changed(self, element: Element, changeset: dict[str, Any]) -> None:\n             ArmedStatus.ARMED_STAY_INSTANT: AlarmControlPanelState.ARMED_HOME,\n             ArmedStatus.ARMED_TO_NIGHT: AlarmControlPanelState.ARMED_NIGHT,\n             ArmedStatus.ARMED_TO_NIGHT_INSTANT: AlarmControlPanelState.ARMED_NIGHT,\n-            ArmedStatus.ARMED_TO_VACATION: AlarmControlPanelState.ARMED_AWAY,\n+            ArmedStatus.ARMED_TO_VACATION: AlarmControlPanelState.ARMED_VACATION,\n         }\n \n         if self._element.alarm_state is None:"
-        }
-      ]
-    },
-    {
-      "sha": "29f680f9120e3f1ccf4c6bbd636d654d50ba85c9",
-      "message": "Add FrankEver virtual integration (#139629)\n\n* Add FranvEver virtual integration\n\n* Fix file name",
-      "changes": [
-        {
-          "file": "homeassistant/components/frankever/__init__.py",
-          "additions": 1,
-          "deletions": 0,
-          "patch": "@@ -0,0 +1 @@\n+\"\"\"FrankEver virtual integration.\"\"\""
-        }
-      ]
-    },
-    {
-      "sha": "220509fd6c55b9f0400539bdb7ffec536504ae04",
-      "message": "Fix body text of imap message not available in custom event data template (#139609)",
-      "changes": [
-        {
-          "file": "homeassistant/components/imap/coordinator.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -280,7 +280,7 @@ async def _async_process_event(self, last_message_uid: str) -> None:\n             if self.custom_event_template is not None:\n                 try:\n                     data[\"custom\"] = self.custom_event_template.async_render(\n-                        data, parse_result=True\n+                        data | {\"text\": message.text}, parse_result=True\n                     )\n                     _LOGGER.debug(\n                         \"IMAP custom template (%s) for msguid %s (%s) rendered to: %s, initial: %s\","
-        },
-        {
-          "file": "tests/components/imap/test_init.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -726,9 +726,10 @@ async def test_message_data(\n     [\n         (\"{{ subject }}\", \"Test subject\", None),\n         ('{{ \"@example.com\" in sender }}', True, None),\n+        ('{{ \"body\" in text }}', True, None),\n         (\"{% bad template }}\", None, \"Error rendering IMAP custom template\"),\n     ],\n-    ids=[\"subject_test\", \"sender_filter\", \"template_error\"],\n+    ids=[\"subject_test\", \"sender_filter\", \"body_filter\", \"template_error\"],\n )\n async def test_custom_template(\n     hass: HomeAssistant,"
-        }
-      ]
-    },
-    {
-      "sha": "7293ae5d51b8e4b38d982af05b6004f91099a0c7",
-      "message": "Fix type for ESPHome assist satellite events (#139618)",
-      "changes": [
-        {
-          "file": "homeassistant/components/esphome/assist_satellite.py",
-          "additions": 3,
-          "deletions": 3,
-          "patch": "@@ -285,9 +285,9 @@ def on_pipeline_event(self, event: PipelineEvent) -> None:\n             assert event.data is not None\n             data_to_send = {\n                 \"conversation_id\": event.data[\"intent_output\"][\"conversation_id\"],\n-                \"continue_conversation\": event.data[\"intent_output\"][\n-                    \"continue_conversation\"\n-                ],\n+                \"continue_conversation\": str(\n+                    int(event.data[\"intent_output\"][\"continue_conversation\"])\n+                ),\n             }\n         elif event_type == VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START:\n             assert event.data is not None"
-        },
-        {
-          "file": "tests/components/esphome/test_assist_satellite.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -298,7 +298,7 @@ async def async_pipeline_from_audio_stream(*args, device_id, **kwargs):\n             VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END,\n             {\n                 \"conversation_id\": conversation_id,\n-                \"continue_conversation\": True,\n+                \"continue_conversation\": \"1\",\n             },\n         )\n "
-        }
-      ]
-    },
-    {
-      "sha": "e3eb6051de652875f794e814f0396367898fd3de",
-      "message": "Fix duplicate unique id issue in Sensibo (#139582)\n\n* Fix duplicate unique id issue in Sensibo\n\n* Fixes\n\n* Mods",
-      "changes": [
-        {
-          "file": "homeassistant/components/sensibo/binary_sensor.py",
-          "additions": 3,
-          "deletions": 3,
-          "patch": "@@ -130,9 +130,10 @@ def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         entities: list[SensiboMotionSensor | SensiboDeviceSensor] = []\n         nonlocal added_devices\n-        new_devices, remove_devices, added_devices = coordinator.get_devices(\n+        new_devices, remove_devices, new_added_devices = coordinator.get_devices(\n             added_devices\n         )\n+        added_devices = new_added_devices\n \n         if LOGGER.isEnabledFor(logging.DEBUG):\n             LOGGER.debug(\n@@ -168,8 +169,7 @@ def _add_remove_devices() -> None:\n                     device_data.model, DEVICE_SENSOR_TYPES\n                 )\n             )\n-\n-        async_add_entities(entities)\n+            async_add_entities(entities)\n \n     entry.async_on_unload(coordinator.async_add_listener(_add_remove_devices))\n     _add_remove_devices()"
-        },
-        {
-          "file": "homeassistant/components/sensibo/button.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -46,7 +46,8 @@ async def async_setup_entry(\n     def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         nonlocal added_devices\n-        new_devices, _, added_devices = coordinator.get_devices(added_devices)\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             async_add_entities("
-        },
-        {
-          "file": "homeassistant/components/sensibo/climate.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -149,7 +149,8 @@ async def async_setup_entry(\n     def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         nonlocal added_devices\n-        new_devices, _, added_devices = coordinator.get_devices(added_devices)\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             async_add_entities("
-        },
-        {
-          "file": "homeassistant/components/sensibo/number.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -76,7 +76,8 @@ async def async_setup_entry(\n     def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         nonlocal added_devices\n-        new_devices, _, added_devices = coordinator.get_devices(added_devices)\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             async_add_entities("
-        },
-        {
-          "file": "homeassistant/components/sensibo/select.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -115,7 +115,8 @@ async def async_setup_entry(\n     def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         nonlocal added_devices\n-        new_devices, _, added_devices = coordinator.get_devices(added_devices)\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             async_add_entities("
-        },
-        {
-          "file": "homeassistant/components/sensibo/sensor.py",
-          "additions": 2,
-          "deletions": 3,
-          "patch": "@@ -253,9 +253,8 @@ def _add_remove_devices() -> None:\n \n         entities: list[SensiboMotionSensor | SensiboDeviceSensor] = []\n         nonlocal added_devices\n-        new_devices, remove_devices, added_devices = coordinator.get_devices(\n-            added_devices\n-        )\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             entities.extend("
-        },
-        {
-          "file": "homeassistant/components/sensibo/switch.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -89,7 +89,8 @@ async def async_setup_entry(\n     def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         nonlocal added_devices\n-        new_devices, _, added_devices = coordinator.get_devices(added_devices)\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             async_add_entities("
-        },
-        {
-          "file": "homeassistant/components/sensibo/update.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -56,7 +56,8 @@ async def async_setup_entry(\n     def _add_remove_devices() -> None:\n         \"\"\"Handle additions of devices and sensors.\"\"\"\n         nonlocal added_devices\n-        new_devices, _, added_devices = coordinator.get_devices(added_devices)\n+        new_devices, _, new_added_devices = coordinator.get_devices(added_devices)\n+        added_devices = new_added_devices\n \n         if new_devices:\n             async_add_entities("
-        },
-        {
-          "file": "tests/components/sensibo/test_coordinator.py",
-          "additions": 4,
-          "deletions": 0,
-          "patch": "@@ -9,6 +9,7 @@\n from freezegun.api import FrozenDateTimeFactory\n from pysensibo.exceptions import AuthenticationError, SensiboError\n from pysensibo.model import SensiboData\n+import pytest\n \n from homeassistant.components.climate import HVACMode\n from homeassistant.components.sensibo.const import DOMAIN\n@@ -25,6 +26,7 @@ async def test_coordinator(\n     mock_client: MagicMock,\n     get_data: tuple[SensiboData, dict[str, Any], dict[str, Any]],\n     freezer: FrozenDateTimeFactory,\n+    caplog: pytest.LogCaptureFixture,\n ) -> None:\n     \"\"\"Test the Sensibo coordinator with errors.\"\"\"\n     config_entry = MockConfigEntry(\n@@ -87,3 +89,5 @@ async def test_coordinator(\n     mock_data.assert_called_once()\n     state = hass.states.get(\"climate.hallway\")\n     assert state.state == STATE_UNAVAILABLE\n+\n+    assert \"Platform sensibo does not generate unique IDs\" not in caplog.text"
-        }
-      ]
-    },
-    {
-      "sha": "cc8ed2c228cca6ca0fdc282075e286bf72c6feec",
-      "message": "Fix demo valve platform to use AddConfigEntryEntitiesCallback (#139602)",
-      "changes": [
-        {
-          "file": "homeassistant/components/demo/valve.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -8,15 +8,15 @@\n from homeassistant.components.valve import ValveEntity, ValveEntityFeature, ValveState\n from homeassistant.config_entries import ConfigEntry\n from homeassistant.core import HomeAssistant\n-from homeassistant.helpers.entity_platform import AddEntitiesCallback\n+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback\n \n OPEN_CLOSE_DELAY = 2  # Used to give a realistic open/close experience in frontend\n \n \n async def async_setup_entry(\n     hass: HomeAssistant,\n     config_entry: ConfigEntry,\n-    async_add_entities: AddEntitiesCallback,\n+    async_add_entities: AddConfigEntryEntitiesCallback,\n ) -> None:\n     \"\"\"Set up the Demo config entry.\"\"\"\n     async_add_entities("
-        }
-      ]
-    },
-    {
-      "sha": "89b655c192d55920ae755397499fd022d4ffa42d",
-      "message": "Fix handling of NaN float values for current humidity in ESPHome (#139600)\n\nfixes #131837",
-      "changes": [
-        {
-          "file": "homeassistant/components/esphome/climate.py",
-          "additions": 7,
-          "deletions": 2,
-          "patch": "@@ -3,6 +3,7 @@\n from __future__ import annotations\n \n from functools import partial\n+from math import isfinite\n from typing import Any, cast\n \n from aioesphomeapi import (\n@@ -238,9 +239,13 @@ def current_temperature(self) -> float | None:\n     @esphome_state_property\n     def current_humidity(self) -> int | None:\n         \"\"\"Return the current humidity.\"\"\"\n-        if not self._static_info.supports_current_humidity:\n+        if (\n+            not self._static_info.supports_current_humidity\n+            or (val := self._state.current_humidity) is None\n+            or not isfinite(val)\n+        ):\n             return None\n-        return round(self._state.current_humidity)\n+        return round(val)\n \n     @property\n     @esphome_float_state_property"
-        },
-        {
-          "file": "tests/components/esphome/test_climate.py",
-          "additions": 2,
-          "deletions": 2,
-          "patch": "@@ -407,7 +407,7 @@ async def test_climate_entity_with_inf_value(\n             target_temperature=math.inf,\n             fan_mode=ClimateFanMode.AUTO,\n             swing_mode=ClimateSwingMode.BOTH,\n-            current_humidity=20.1,\n+            current_humidity=math.inf,\n             target_humidity=25.7,\n         )\n     ]\n@@ -422,7 +422,7 @@ async def test_climate_entity_with_inf_value(\n     assert state is not None\n     assert state.state == HVACMode.AUTO\n     attributes = state.attributes\n-    assert attributes[ATTR_CURRENT_HUMIDITY] == 20\n+    assert ATTR_CURRENT_HUMIDITY not in attributes\n     assert attributes[ATTR_HUMIDITY] == 26\n     assert attributes[ATTR_MAX_HUMIDITY] == 30\n     assert attributes[ATTR_MIN_HUMIDITY] == 10"
-        }
-      ]
-    },
-    {
-      "sha": "c1686953239e4f18819c45b59aafe1d92d411236",
-      "message": "Clean up squeezebox build_item_response part 1 (#139321)\n\n* initial\n\n* final\n\n* is internal change\n\n* test data coverage\n\n* Review fixes\n\n* final",
-      "changes": [
-        {
-          "file": "tests/components/squeezebox/conftest.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -163,7 +163,7 @@ async def mock_async_browse(\n             \"title\": \"Fake Item 2\",\n             \"id\": FAKE_VALID_ITEM_ID + \"_2\",\n             \"hasitems\": media_type == \"favorites\",\n-            \"isaudio\": True,\n+            \"isaudio\": False,\n             \"item_type\": child_types[media_type],\n             \"image_url\": \"http://lms.internal:9000/html/images/favorites.png\",\n             \"url\": \"file:///var/lib/squeezeboxserver/music/track_2.mp3\","
-        }
-      ]
-    },
-    {
-      "sha": "51beb1c0a86881eb9b411e8b1417527da7b39310",
-      "message": "Add simplisafe OUTDOOR_ALARM_SECURITY_BELL_BOX device type (#134386)\n\n* Update binary_sensor.py to included OUTDOOR_ALARM_SECURITY_BELL_BOX device type\n\nAdd support for DeviceTypes.OUTDOOR_ALARM_SECURITY_BELL_BOX\r\n\r\nThis is an external siren device in Simplisafe which is not  currently discovered with the HA integration\n\n* Fixed formatting error\n\n---------\n\nCo-authored-by: Franck Nijhof <git@frenck.dev>",
-      "changes": [
-        {
-          "file": "homeassistant/components/simplisafe/binary_sensor.py",
-          "additions": 2,
-          "deletions": 0,
-          "patch": "@@ -34,6 +34,7 @@\n     DeviceTypes.PANIC_BUTTON,\n     DeviceTypes.REMOTE,\n     DeviceTypes.SIREN,\n+    DeviceTypes.OUTDOOR_ALARM_SECURITY_BELL_BOX,\n     DeviceTypes.SMOKE,\n     DeviceTypes.SMOKE_AND_CARBON_MONOXIDE,\n     DeviceTypes.TEMPERATURE,\n@@ -47,6 +48,7 @@\n     DeviceTypes.MOTION: BinarySensorDeviceClass.MOTION,\n     DeviceTypes.MOTION_V2: BinarySensorDeviceClass.MOTION,\n     DeviceTypes.SIREN: BinarySensorDeviceClass.SAFETY,\n+    DeviceTypes.OUTDOOR_ALARM_SECURITY_BELL_BOX: BinarySensorDeviceClass.SAFETY,\n     DeviceTypes.SMOKE: BinarySensorDeviceClass.SMOKE,\n     # Although this sensor can technically apply to both smoke and carbon, we use the\n     # SMOKE device class for simplicity:"
-        }
-      ]
-    },
-    {
-      "sha": "0c5766184b4b49d72302e31a99578c0a86cb937f",
-      "message": "Fix Manufacturer naming for Squeezelite model name for Squeezebox (#139586)\n\nSqueezelite Manufacturer Fix",
-      "changes": [
-        {
-          "file": "homeassistant/components/squeezebox/media_player.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -224,7 +224,7 @@ def __init__(self, coordinator: SqueezeBoxPlayerUpdateCoordinator) -> None:\n         self._previous_media_position = 0\n         self._attr_unique_id = format_mac(player.player_id)\n         _manufacturer = None\n-        if player.model == \"SqueezeLite\" or \"SqueezePlay\" in player.model:\n+        if player.model.startswith(\"SqueezeLite\") or \"SqueezePlay\" in player.model:\n             _manufacturer = \"Ralph Irving\"\n         elif (\n             \"Squeezebox\" in player.model"
+          "file": "homeassistant/components/onkyo/media_player.py",
+          "patch": "@@ -588,7 +588,7 @@ def process_update(self, update: tuple[str, str, Any]) -> None:\n             self._attr_volume_level = min(1, volume_level)\n         elif command in [\"muting\", \"audio-muting\"]:\n             self._attr_is_volume_muted = bool(value == \"on\")\n-        elif command in [\"selector\", \"input-selector\"]:\n+        elif command in [\"selector\", \"input-selector\"] and value != \"N/A\":\n             self._parse_source(value)\n             self._query_av_info_delayed()\n         elif command == \"hdmi-output-selector\":"
         }
       ]
     }

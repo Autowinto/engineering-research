@@ -2,13 +2,31 @@
   "repo_name": "yt-dlp/yt-dlp",
   "commits": [
     {
+      "sha": "bd0a66816934de70312eea1e71c59c13b401dc3a",
+      "message": "[ie/pinterest] Fix extractor (#12538)\n\nCloses #12529\nAuthored by: mikf\n\nCo-authored-by: =?UTF-8?q?Mike=20F=C3=A4hrmann?= <mike_faehrmann@web.de>",
+      "changes": [
+        {
+          "file": "yt_dlp/extractor/pinterest.py",
+          "patch": "@@ -23,9 +23,9 @@ class PinterestBaseIE(InfoExtractor):\n     def _call_api(self, resource, video_id, options):\n         return self._download_json(\n             f'https://www.pinterest.com/resource/{resource}Resource/get/',\n-            video_id, f'Download {resource} JSON metadata', query={\n-                'data': json.dumps({'options': options}),\n-            })['resource_response']\n+            video_id, f'Download {resource} JSON metadata',\n+            query={'data': json.dumps({'options': options})},\n+            headers={'X-Pinterest-PWS-Handler': 'www/[username].js'})['resource_response']\n \n     def _extract_video(self, data, extract_formats=True):\n         video_id = data['id']"
+        }
+      ]
+    },
+    {
+      "sha": "b8b47547049f5ebc3dd680fc7de70ed0ca9c0d70",
+      "message": "[ie/twitter] Fix syndication token generation (#12537)\n\nFix 14cd7f3443c6da4d49edaefcc12da9dee86e243e\n\nAuthored by: bashonly",
+      "changes": [
+        {
+          "file": "yt_dlp/extractor/twitter.py",
+          "patch": "@@ -1334,7 +1334,7 @@ def _build_graphql_query(self, media_id):\n     def _generate_syndication_token(self, twid):\n         # ((Number(twid) / 1e15) * Math.PI).toString(36).replace(/(0+|\\.)/g, '')\n         translation = str.maketrans(dict.fromkeys('0.'))\n-        return js_number_to_string((int(twid) / 1e15) * math.PI, 36).translate(translation)\n+        return js_number_to_string((int(twid) / 1e15) * math.pi, 36).translate(translation)\n \n     def _call_syndication_api(self, twid):\n         self.report_warning("
+        }
+      ]
+    },
+    {
       "sha": "79ec2fdff75c8c1bb89b550266849ad4dec48dd3",
       "message": "[ie/youtube] Warn on missing formats due to SSAP (#12483)\n\nSee https://github.com/yt-dlp/yt-dlp/issues/12482\n\nAuthored by: coletdjnz",
       "changes": [
         {
           "file": "yt_dlp/extractor/youtube.py",
-          "additions": 7,
-          "deletions": 1,
           "patch": "@@ -4266,6 +4266,7 @@ def build_fragments(f):\n             } for range_start in range(0, f['filesize'], CHUNK_SIZE))\n \n         for fmt in streaming_formats:\n+            client_name = fmt[STREAMING_DATA_CLIENT_NAME]\n             if fmt.get('targetDurationSec'):\n                 continue\n \n@@ -4310,6 +4311,12 @@ def build_fragments(f):\n                 fmt_url = url_or_none(try_get(sc, lambda x: x['url'][0]))\n                 encrypted_sig = try_get(sc, lambda x: x['s'][0])\n                 if not all((sc, fmt_url, player_url, encrypted_sig)):\n+                    self.report_warning(\n+                        f'Some {client_name} client formats have been skipped as they are missing a url. '\n+                        f'{\"Your account\" if self.is_authenticated else \"The current session\"} may have '\n+                        f'the SSAP (server-side ads) experiment which may be interfering with yt-dlp. '\n+                        f'Please see  https://github.com/yt-dlp/yt-dlp/issues/12482  for more details.',\n+                        only_once=True)\n                     continue\n                 try:\n                     fmt_url += '&{}={}'.format(\n@@ -4356,7 +4363,6 @@ def build_fragments(f):\n                 self.report_warning(\n                     f'{video_id}: Some formats are possibly damaged. They will be deprioritized', only_once=True)\n \n-            client_name = fmt[STREAMING_DATA_CLIENT_NAME]\n             po_token = fmt.get(STREAMING_DATA_INITIAL_PO_TOKEN)\n \n             if po_token:"
         }
       ]
@@ -19,8 +37,6 @@
       "changes": [
         {
           "file": "yt_dlp/extractor/niconico.py",
-          "additions": 5,
-          "deletions": 1,
           "patch": "@@ -28,6 +28,7 @@\n     try_get,\n     unescapeHTML,\n     update_url_query,\n+    url_basename,\n     url_or_none,\n     urlencode_postdata,\n     urljoin,\n@@ -432,6 +433,7 @@ def _yield_dms_formats(self, api_data, video_id):\n                     'format_id': ('id', {str}),\n                     'abr': ('bitRate', {float_or_none(scale=1000)}),\n                     'asr': ('samplingRate', {int_or_none}),\n+                    'quality': ('qualityLevel', {int_or_none}),\n                 }), get_all=False),\n                 'acodec': 'aac',\n             }\n@@ -443,7 +445,9 @@ def _yield_dms_formats(self, api_data, video_id):\n         min_abr = min(traverse_obj(audios, (..., 'bitRate', {float_or_none})), default=0) / 1000\n         for video_fmt in video_fmts:\n             video_fmt['tbr'] -= min_abr\n-            video_fmt['format_id'] = f'video-{video_fmt[\"tbr\"]:.0f}'\n+            video_fmt['format_id'] = url_basename(video_fmt['url']).rpartition('.')[0]\n+            video_fmt['quality'] = traverse_obj(videos, (\n+                lambda _, v: v['id'] == video_fmt['format_id'], 'qualityLevel', {int_or_none}, any)) or -1\n             yield video_fmt\n \n     def _real_extract(self, url):"
         }
       ]
@@ -31,45 +47,7 @@
       "changes": [
         {
           "file": "yt_dlp/extractor/lbry.py",
-          "additions": 2,
-          "deletions": 1,
           "patch": "@@ -26,6 +26,7 @@ class LBRYBaseIE(InfoExtractor):\n     _CLAIM_ID_REGEX = r'[0-9a-f]{1,40}'\n     _OPT_CLAIM_ID = f'[^$@:/?#&]+(?:[:#]{_CLAIM_ID_REGEX})?'\n     _SUPPORTED_STREAM_TYPES = ['video', 'audio']\n+    _UNSUPPORTED_STREAM_TYPES = ['binary']\n     _PAGE_SIZE = 50\n \n     def _call_api_proxy(self, method, display_id, params, resource):\n@@ -341,7 +342,7 @@ def _real_extract(self, url):\n                 HEADRequest(streaming_url), display_id, headers=headers,\n                 note='Downloading streaming redirect url info').url\n \n-        elif result.get('value_type') == 'stream':\n+        elif result.get('value_type') == 'stream' and stream_type not in self._UNSUPPORTED_STREAM_TYPES:\n             claim_id, is_live = result['signing_channel']['claim_id'], True\n             live_data = self._download_json(\n                 'https://api.odysee.live/livestream/is_live', claim_id,"
-        }
-      ]
-    },
-    {
-      "sha": "9f77e04c76e36e1cbbf49bc9eb385fa6ef804b67",
-      "message": "Fix external downloader availability when using `--ffmpeg-location` (#12318)\n\nThis fix is only applicable to the CLI option\n\nAuthored by: Kenshin9977",
-      "changes": [
-        {
-          "file": "yt_dlp/downloader/external.py",
-          "additions": 0,
-          "deletions": 2,
-          "patch": "@@ -457,8 +457,6 @@ class FFmpegFD(ExternalFD):\n \n     @classmethod\n     def available(cls, path=None):\n-        # TODO: Fix path for ffmpeg\n-        # Fixme: This may be wrong when --ffmpeg-location is used\n         return FFmpegPostProcessor().available\n \n     def on_process_started(self, proc, stdin):"
-        },
-        {
-          "file": "yt_dlp/postprocessor/ffmpeg.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -202,7 +202,7 @@ def _probe_version(self):\n \n     @property\n     def available(self):\n-        return self.basename is not None\n+        return bool(self._ffmpeg_location.get()) or self.basename is not None\n \n     @property\n     def executable(self):"
-        }
-      ]
-    },
-    {
-      "sha": "c034d655487be668222ef9476a16f374584e49a7",
-      "message": "Fix lazy extractor state (Fix 4445f37a7a66b248dbd8376c43137e6e441f138e) (#12452)\n\nAuthored by: coletdjnz, Grub4K, pukkandan",
-      "changes": [
-        {
-          "file": "yt_dlp/extractor/extractors.py",
-          "additions": 4,
-          "deletions": 2,
-          "patch": "@@ -5,12 +5,14 @@\n from ..globals import extractors as _extractors_context\n \n _CLASS_LOOKUP = None\n-if not os.environ.get('YTDLP_NO_LAZY_EXTRACTORS'):\n+if os.environ.get('YTDLP_NO_LAZY_EXTRACTORS'):\n+    LAZY_EXTRACTORS.value = False\n+else:\n     try:\n         from .lazy_extractors import _CLASS_LOOKUP\n         LAZY_EXTRACTORS.value = True\n     except ImportError:\n-        LAZY_EXTRACTORS.value = False\n+        LAZY_EXTRACTORS.value = None\n \n if not _CLASS_LOOKUP:\n     from . import _extractors"
-        },
-        {
-          "file": "yt_dlp/globals.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -27,4 +27,4 @@ def __repr__(self, /):\n \n # Misc\n IN_CLI = Indirect(False)\n-LAZY_EXTRACTORS = Indirect(False)  # `False`=force, `None`=disabled, `True`=enabled\n+LAZY_EXTRACTORS = Indirect(None)  # `False`=force, `None`=disabled, `True`=enabled"
         }
       ]
     },
@@ -79,8 +57,6 @@
       "changes": [
         {
           "file": "yt_dlp/extractor/instagram.py",
-          "additions": 4,
-          "deletions": 2,
           "patch": "@@ -33,8 +33,10 @@ def _pk_to_id(media_id):\n \n \n def _id_to_pk(shortcode):\n-    \"\"\"Covert a shortcode to a numeric value\"\"\"\n-    return decode_base_n(shortcode[:11], table=_ENCODING_CHARS)\n+    \"\"\"Convert a shortcode to a numeric value\"\"\"\n+    if len(shortcode) > 28:\n+        shortcode = shortcode[:-28]\n+    return decode_base_n(shortcode, table=_ENCODING_CHARS)\n \n \n class InstagramBaseIE(InfoExtractor):"
         }
       ]
@@ -91,21 +67,7 @@
       "changes": [
         {
           "file": "yt_dlp/extractor/niconico.py",
-          "additions": 3,
-          "deletions": 0,
           "patch": "@@ -13,11 +13,13 @@\n     ExtractorError,\n     OnDemandPagedList,\n     clean_html,\n+    determine_ext,\n     float_or_none,\n     int_or_none,\n     join_nonempty,\n     parse_duration,\n     parse_iso8601,\n+    parse_qs,\n     parse_resolution,\n     qualities,\n     remove_start,\n@@ -1033,6 +1035,7 @@ def _real_extract(self, url):\n                 thumbnails.append({\n                     'id': f'{name}_{width}x{height}',\n                     'url': img_url,\n+                    'ext': traverse_obj(parse_qs(img_url), ('image', 0, {determine_ext(default_ext='jpg')})),\n                     **res,\n                 })\n "
-        }
-      ]
-    },
-    {
-      "sha": "4ecb833472c90e078567b561fb7c089f1aa9587b",
-      "message": "[misc] Clarify that the issue template cannot be removed (#12332)\n\nFix 517ddf3c3f12560ab93e3d36244dc82db9f97818\r\n\r\nAuthored by: bashonly",
-      "changes": [
-        {
-          "file": "devscripts/make_issue_template.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -56,7 +56,7 @@\n     attributes:\n       value: |\n         > [!IMPORTANT]\n-        > Not providing the required (*) information will result in your issue being closed and ignored.\n+        > Not providing the required (*) information or removing the template will result in your issue being closed and ignored.\n '''.strip()\n \n "
         }
       ]
     },
@@ -115,8 +77,6 @@
       "changes": [
         {
           "file": "yt_dlp/extractor/francetv.py",
-          "additions": 2,
-          "deletions": 1,
           "patch": "@@ -358,7 +358,8 @@ def _real_extract(self, url):\n             # For livestreams we need the id of the stream instead of the currently airing episode id\n             video_id = traverse_obj(nextjs_data, (\n                 ..., ..., 'children', ..., 'children', ..., 'children', ..., 'children', ..., ...,\n-                'children', ..., ..., 'children', ..., ..., 'children', ..., 'options', 'id', {str}, any))\n+                'children', ..., ..., 'children', ..., ..., 'children', (..., (..., ...)),\n+                'options', 'id', {str}, any))\n         else:\n             video_id = traverse_obj(nextjs_data, (\n                 ..., ..., ..., 'children',"
         }
       ]
@@ -127,33 +87,7 @@
       "changes": [
         {
           "file": "yt_dlp/extractor/goplay.py",
-          "additions": 4,
-          "deletions": 3,
           "patch": "@@ -12,7 +12,6 @@\n from ..utils import (\n     ExtractorError,\n     int_or_none,\n-    js_to_json,\n     remove_end,\n     traverse_obj,\n )\n@@ -76,6 +75,7 @@ def _real_initialize(self):\n         if not self._id_token:\n             raise self.raise_login_required(method='password')\n \n+    # XXX: For parsing next.js v15+ data; see also yt_dlp.extractor.francetv\n     def _find_json(self, s):\n         return self._search_json(\n             r'\\w+\\s*:\\s*', s, 'next js data', None, contains_pattern=r'\\[(?s:.+)\\]', default=None)\n@@ -86,9 +86,10 @@ def _real_extract(self, url):\n \n         nextjs_data = traverse_obj(\n             re.findall(r'<script[^>]*>\\s*self\\.__next_f\\.push\\(\\s*(\\[.+?\\])\\s*\\);?\\s*</script>', webpage),\n-            (..., {js_to_json}, {json.loads}, ..., {self._find_json}, ...))\n+            (..., {json.loads}, ..., {self._find_json}, ...))\n         meta = traverse_obj(nextjs_data, (\n-            ..., lambda _, v: v['meta']['path'] == urllib.parse.urlparse(url).path, 'meta', any))\n+            ..., ..., 'children', ..., ..., 'children',\n+            lambda _, v: v['video']['path'] == urllib.parse.urlparse(url).path, 'video', any))\n \n         video_id = meta['uuid']\n         info_dict = traverse_obj(meta, {"
-        }
-      ]
-    },
-    {
-      "sha": "861aeec449c8f3c062d962945b234ff0341f61f3",
-      "message": "[ie/dropbox] Fix extraction (#12228)\n\nCloses #12109\r\nAuthored by: bashonly",
-      "changes": [
-        {
-          "file": "yt_dlp/extractor/dropbox.py",
-          "additions": 1,
-          "deletions": 1,
-          "patch": "@@ -82,7 +82,7 @@ def _real_extract(self, url):\n                 has_anonymous_download = self._search_regex(\n                     r'(anonymous:\\tanonymous)', part, 'anonymous', default=False)\n             transcode_url = self._search_regex(\n-                r'\\n.(https://[^\\x03\\x08\\x12\\n]+\\.m3u8)', part, 'transcode url', default=None)\n+                r'\\n.?(https://[^\\x03\\x08\\x12\\n]+\\.m3u8)', part, 'transcode url', default=None)\n             if not transcode_url:\n                 continue\n             formats, subtitles = self._extract_m3u8_formats_and_subtitles(transcode_url, video_id, 'mp4')"
-        }
-      ]
-    },
-    {
-      "sha": "18a28514e306e822eab4f3a79c76d515bf076406",
-      "message": "[ie/cwtv] Fix extractor (#12207)\n\nCloses #12108\r\nAuthored by: arantius",
-      "changes": [
-        {
-          "file": "yt_dlp/extractor/theplatform.py",
-          "additions": 2,
-          "deletions": 1,
-          "patch": "@@ -118,8 +118,9 @@ def extract_site_specific_field(field):\n                 'categories', lambda _, v: v.get('label') in ('category', None), 'name', {str})) or None,\n             'tags': traverse_obj(info, ('keywords', {lambda x: re.split(r'[;,]\\s?', x) if x else None})),\n             'location': extract_site_specific_field('region'),\n-            'series': extract_site_specific_field('show'),\n+            'series': extract_site_specific_field('show') or extract_site_specific_field('seriesTitle'),\n             'season_number': int_or_none(extract_site_specific_field('seasonNumber')),\n+            'episode_number': int_or_none(extract_site_specific_field('episodeNumber')),\n             'media_type': extract_site_specific_field('programmingType') or extract_site_specific_field('type'),\n         }\n "
         }
       ]
     }

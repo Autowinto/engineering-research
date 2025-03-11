@@ -1,0 +1,25 @@
+{
+  "repo_name": "tensorflow/models",
+  "commits": [
+    {
+      "sha": "9a2b4a85af38835909b71ca59a2c531fd5c20f47",
+      "message": "In TensorFlow Object Detection, fixed the order of the arguments when calling KeypointEstimationParams super class's __new__ method.\n\nSpecifically, the order for the last two elements 'gaussian_denom_ratio', 'argmax_postprocessing' are corrected.\n\nPiperOrigin-RevId: 733826226",
+      "changes": [
+        {
+          "file": "research/object_detection/meta_architectures/center_net_meta_arch.py",
+          "patch": "@@ -2384,7 +2384,7 @@ def __new__(cls,\n         offset_head_num_filters, offset_head_kernel_sizes,\n         regress_head_num_filters, regress_head_kernel_sizes,\n         score_distance_multiplier, std_dev_multiplier, rescoring_threshold,\n-        argmax_postprocessing, gaussian_denom_ratio)\n+        gaussian_denom_ratio, argmax_postprocessing)\n \n \n class ObjectCenterParams("
+        }
+      ]
+    },
+    {
+      "sha": "bdbcbaa89ff0a4a807c3cfb72f5f9842fc611e34",
+      "message": "Update beta sampling code in augment.py\n\nThe function `_sample_from_beta(alpha, beta, shape)` in `MixupAndCutmix` class, is not having the same functionality as `numpy.random.beta`. So `tfm.vision.augment.MixupAndCutmix._sample_from_beta(0.2, 0.2, tf.shape( tf.range(10000))).numpy()` is also deviating as well. So suggesting the fix keeping `alpha=alpha, beta=1.0` in  `_sample_from_beta`. The reproduced [gist](https://colab.sandbox.google.com/gist/LakshmiKalaKadali/06533824610d6e85ea4aa3c6399819e6/tf_model_13490.ipynb#scrollTo=zSlE-3YDjL91) also attached. \r\n\r\nThis PR closes [#13490](https://github.com/tensorflow/models/issues/13490)\r\n\r\nThank You",
+      "changes": [
+        {
+          "file": "official/vision/ops/augment.py",
+          "patch": "@@ -2697,8 +2697,8 @@ def distort(self, images: tf.Tensor,\n \n   @staticmethod\n   def _sample_from_beta(alpha, beta, shape):\n-    sample_alpha = tf.random.gamma(shape, 1., beta=alpha)\n-    sample_beta = tf.random.gamma(shape, 1., beta=beta)\n+    sample_alpha = tf.random.gamma(shape, alpha, beta=1.0)\n+    sample_beta = tf.random.gamma(shape, alpha, beta=1.0)\n     return sample_alpha / (sample_alpha + sample_beta)\n \n   def _cutmix(self, images: tf.Tensor,"
+        }
+      ]
+    }
+  ]
+}
