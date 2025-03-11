@@ -1,17 +1,20 @@
 import requests
 from typing import List, Dict
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class GithubRepoFetcher:
     def __init__(self):
         self.base_url = "https://api.github.com"
-        token = os.getenv('GITHUB_TOKEN')
+        token = os.getenv("GITHUB_TOKEN")
         if not token:
             raise ValueError("GITHUB_TOKEN environment variable is required")
         self.headers = {
             "Accept": "application/vnd.github.v3+json",
-            "Authorization": f"token {token}"
+            "Authorization": f"token {token}",
         }
 
     def fetch_python_repos(self, min_stars: int = 100, per_page: int = 5) -> List[Dict]:
@@ -19,14 +22,14 @@ class GithubRepoFetcher:
             "q": "language:python",  # Python as primary language
             "sort": "stars",
             "order": "desc",
-            "per_page": per_page
+            "per_page": per_page,
         }
 
         try:
             response = requests.get(
                 f"{self.base_url}/search/repositories",
                 headers=self.headers,
-                params=query_params
+                params=query_params,
             )
             response.raise_for_status()
 
@@ -38,7 +41,7 @@ class GithubRepoFetcher:
                     "stars": repo["stargazers_count"],
                     "description": repo["description"],
                     "url": repo["html_url"],
-                    "created_at": repo["created_at"]
+                    "created_at": repo["created_at"],
                 }
                 for repo in repos
                 if repo["language"] == "Python"
@@ -62,7 +65,7 @@ class GithubRepoFetcher:
         repo_name: str,
         max_commits: int = 10,
         include_keywords: List[str] = None,
-        exclude_keywords: List[str] = None
+        exclude_keywords: List[str] = None,
     ) -> List[Dict]:
         commits_url = f"{self.base_url}/repos/{repo_name}/commits"
         params = {"per_page": max_commits}
@@ -70,8 +73,7 @@ class GithubRepoFetcher:
         exclude_keywords = exclude_keywords or []
 
         try:
-            response = requests.get(
-                commits_url, headers=self.headers, params=params)
+            response = requests.get(commits_url, headers=self.headers, params=params)
             response.raise_for_status()
             commits = []
 
@@ -83,34 +85,39 @@ class GithubRepoFetcher:
                     continue
 
                 # Skip if include keywords specified but doesn't match
-                if include_keywords and not self._matches_keywords(message, include_keywords):
+                if include_keywords and not self._matches_keywords(
+                    message, include_keywords
+                ):
                     continue
 
                 details = self.get_commit_details(repo_name, commit["sha"])
 
                 # Filter for Python files with small changes and non-empty patches
                 python_changes = [
-                    file for file in details.get("files", [])
+                    file
+                    for file in details.get("files", [])
                     if file["filename"].endswith(".py")
                     and (file.get("additions", 0) + file.get("deletions", 0)) <= 10
                     and file.get("patch")  # Only include changes with patches
                 ]
 
                 if python_changes:
-                    commits.append({
-                        "sha": commit["sha"],
-                        "message": message,
-                        "date": commit["commit"]["author"]["date"],
-                        "changes": [
-                            {
-                                "file": f["filename"],
-                                "additions": f.get("additions", 0),
-                                "deletions": f.get("deletions", 0),
-                                "patch": f["patch"]
-                            }
-                            for f in python_changes
-                        ]
-                    })
+                    commits.append(
+                        {
+                            "sha": commit["sha"],
+                            "message": message,
+                            "date": commit["commit"]["author"]["date"],
+                            "changes": [
+                                {
+                                    "file": f["filename"],
+                                    "additions": f.get("additions", 0),
+                                    "deletions": f.get("deletions", 0),
+                                    "patch": f["patch"],
+                                }
+                                for f in python_changes
+                            ],
+                        }
+                    )
 
             return commits
 
@@ -131,16 +138,16 @@ if __name__ == "__main__":
     for repo in python_repos[:5]:
         print(f"\nRepository: {repo['name']}")
         commits = fetcher.get_filtered_commits(
-            repo['name'],
+            repo["name"],
             max_commits=10,
             include_keywords=include_keywords,
-            exclude_keywords=exclude_keywords
+            exclude_keywords=exclude_keywords,
         )
 
         for commit in commits:  # Show first 5 matching commits
             print(f"\nCommit: {commit['sha'][:8]}")
             print(f"Message: {commit['message']}")
-            for change in commit['changes']:
+            for change in commit["changes"]:
                 print(f"File: {change['file']}")
                 print("Patch:")
-                print(change['patch'])
+                print(change["patch"])
