@@ -1,0 +1,239 @@
+{
+  "repo_name": "3b1b/manim",
+  "commits": [
+    {
+      "sha": "db421e3981d77676db4a701df9f850fedd545cc7",
+      "message": "Video work (#2318)\n\n* Only use -no-pdf for xelatex rendering\n\n* Instead of tracking du and dv points on surface, track points off the surface in the normal direction\n\nThis means that surface shading will not necessarily work well for arbitrary transformations of the surface. But the existing solution was flimsy anyway, and caused annoying issues with singularity points.\n\n* Have density of anchor points on arcs depend on arc length\n\n* Allow for specifying true normals and orientation of Sphere\n\n* Change miter threshold on stroke shader\n\n* Add get_start_and_end to DashedLine\n\n* Add min_total_width option to DecimalNumber\n\n* Have BackgroundRectangle.set_style absorb (and ignore) added configuration\n\nNote, this feels suboptimal\n\n* Add LineBrace\n\n* Update font_size adjustment in Tex",
+      "changes": [
+        {
+          "file": "manimlib/mobject/geometry.py",
+          "additions": 8,
+          "deletions": 1,
+          "patch": "@@ -208,12 +208,16 @@ def __init__(\n         start_angle: float = 0,\n         angle: float = TAU / 4,\n         radius: float = 1.0,\n-        n_components: int = 8,\n+        n_components: Optional[int] = None,\n         arc_center: Vect3 = ORIGIN,\n         **kwargs\n     ):\n         super().__init__(**kwargs)\n \n+        if n_components is None:\n+            # 16 components for a full circle\n+            n_components = int(15 * (abs(angle) / TAU)) + 1\n+\n         self.set_points(quadratic_bezier_points_for_arc(angle, n_components))\n         self.rotate(start_angle, about_point=ORIGIN)\n         self.scale(radius, about_point=ORIGIN)\n@@ -597,6 +601,9 @@ def get_end(self) -> Vect3:\n         else:\n             return Line.get_end(self)\n \n+    def get_start_and_end(self) -> Tuple[Vect3, Vect3]:\n+        return self.get_start(), self.get_end()\n+\n     def get_first_handle(self) -> Vect3:\n         return self.submobjects[0].get_points()[1]\n "
+        },
+        {
+          "file": "manimlib/mobject/numbers.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -40,6 +40,7 @@ def __init__(\n         fill_opacity: float = 1.0,\n         fill_border_width: float = 0.5,\n         num_decimal_places: int = 2,\n+        min_total_width: Optional[int] = 0,\n         include_sign: bool = False,\n         group_with_commas: bool = True,\n         digit_buff_per_font_unit: float = 0.001,\n@@ -54,6 +55,7 @@ def __init__(\n         self.num_decimal_places = num_decimal_places\n         self.include_sign = include_sign\n         self.group_with_commas = group_with_commas\n+        self.min_total_width = min_total_width\n         self.digit_buff_per_font_unit = digit_buff_per_font_unit\n         self.show_ellipsis = show_ellipsis\n         self.unit = unit\n@@ -167,6 +169,7 @@ def get_formatter(self, **kwargs) -> str:\n                 \"include_sign\",\n                 \"group_with_commas\",\n                 \"num_decimal_places\",\n+                \"min_total_width\",\n             ]\n         ])\n         config.update(kwargs)\n@@ -176,6 +179,7 @@ def get_formatter(self, **kwargs) -> str:\n             config.get(\"field_name\", \"\"),\n             \":\",\n             \"+\" if config[\"include_sign\"] else \"\",\n+            \"0\" + str(config.get(\"min_total_width\", \"\")) if config.get(\"min_total_width\") else \"\",\n             \",\" if config[\"group_with_commas\"] else \"\",\n             f\".{ndp}f\" if ndp > 0 else \"d\",\n             \"}\","
+        },
+        {
+          "file": "manimlib/mobject/shape_matchers.py",
+          "additions": 2,
+          "deletions": 1,
+          "patch": "@@ -79,7 +79,8 @@ def set_style(\n         stroke_width: float | None = None,\n         fill_color: ManimColor | None = None,\n         fill_opacity: float | None = None,\n-        family: bool = True\n+        family: bool = True,\n+        **kwargs\n     ) -> Self:\n         # Unchangeable style, except for fill_opacity\n         VMobject.set_style("
+        },
+        {
+          "file": "manimlib/mobject/svg/tex_mobject.py",
+          "additions": 6,
+          "deletions": 4,
+          "patch": "@@ -18,7 +18,7 @@\n     from manimlib.typing import ManimColor, Span, Selector, Self\n \n \n-SCALE_FACTOR_PER_FONT_POINT = 0.001\n+TEX_MOB_SCALE_FACTOR = 0.001\n \n \n class Tex(StringMobject):\n@@ -49,7 +49,6 @@ def __init__(\n         if not tex_string.strip():\n             tex_string = R\"\\\\\"\n \n-        self.font_size = font_size\n         self.tex_string = tex_string\n         self.alignment = alignment\n         self.template = template\n@@ -64,13 +63,16 @@ def __init__(\n         )\n \n         self.set_color_by_tex_to_color_map(self.tex_to_color_map)\n-        self.scale(SCALE_FACTOR_PER_FONT_POINT * font_size)\n+        self.scale(TEX_MOB_SCALE_FACTOR * font_size)\n+\n+        self.font_size = font_size  # Important for this to go after the scale call\n \n     def get_svg_string_by_content(self, content: str) -> str:\n         return latex_to_svg(content, self.template, self.additional_preamble, short_tex=self.tex_string)\n \n     def _handle_scale_side_effects(self, scale_factor: float) -> Self:\n-        self.font_size *= scale_factor\n+        if hasattr(self, \"font_size\"):\n+            self.font_size *= scale_factor\n         return self\n \n     # Parsing"
+        }
+      ]
+    },
+    {
+      "sha": "24eefef5bf185f7523799b5fcf71b4a90fca8c24",
+      "message": "Automatically identify the class name based on the specified line number. (#2280)\n\n* identify the scene name based on the line number\r\n\r\n* resolving a minor bug in string_mobject\r\n\r\n* removing bug of string validation\r\n\r\n* Update manimlib/default_config.yml\r\n\r\nCo-authored-by: Splines <37160523+Splines@users.noreply.github.com>\r\n\r\n* Update manimlib/extract_scene.py\r\n\r\nCo-authored-by: Splines <37160523+Splines@users.noreply.github.com>\r\n\r\n* update search scene names\r\n\r\n---------\r\n\r\nCo-authored-by: Splines <37160523+Splines@users.noreply.github.com>",
+      "changes": [
+        {
+          "file": "manimlib/mobject/probability.py",
+          "additions": 1,
+          "deletions": 0,
+          "patch": "@@ -43,6 +43,7 @@ def __init__(\n             fill_opacity=fill_opacity,\n             stroke_width=stroke_width,\n             stroke_color=stroke_color,\n+            **kwargs\n         )\n         self.default_label_scale_val = default_label_scale_val\n "
+        },
+        {
+          "file": "manimlib/mobject/svg/string_mobject.py",
+          "additions": 2,
+          "deletions": 2,
+          "patch": "@@ -122,8 +122,8 @@ def mobjects_from_svg_string(self, svg_string: str) -> list[VMobject]:\n         # of submobject which are and use those for labels\n         unlabelled_submobs = submobs\n         labelled_content = self.get_content(is_labelled=True)\n-        labelled_file = self.get_file_path_by_content(labelled_content)\n-        labelled_submobs = super().mobjects_from_file(labelled_file)\n+        labelled_file = self.get_svg_string_by_content(labelled_content)\n+        labelled_submobs = super().mobjects_from_svg_string(labelled_file)\n         self.labelled_submobs = labelled_submobs\n         self.unlabelled_submobs = unlabelled_submobs\n "
+        },
+        {
+          "file": "manimlib/mobject/svg/text_mobject.py",
+          "additions": 0,
+          "deletions": 3,
+          "patch": "@@ -176,9 +176,6 @@ def __init__(\n         self.disable_ligatures = disable_ligatures\n         self.isolate = isolate\n \n-        if not isinstance(self, Text):\n-            self.validate_markup_string(text)\n-\n         super().__init__(text, height=height, **kwargs)\n \n         if self.t2g:"
+        }
+      ]
+    },
+    {
+      "sha": "96d44bd560564882ddc6f0d81b92ca2a00b5954b",
+      "message": "Video work (#2284)\n\n* Comment tweak\r\n\r\n* Directly print traceback\r\n\r\nSince the shell.showtraceback is giving some issues\r\n\r\n* Make InteracrtiveSceneEmbed into a class\r\n\r\nThis way it can keep track of it's internal shell; use of get_ipython has a finicky relationship with reloading.\r\n\r\n* Move remaining checkpoint_paste logic into scene_embed.py\r\n\r\nThis involved making a few context managers for Scene: temp_record, temp_skip, temp_progress_bar, which seem useful in and of themselves.\r\n\r\n* Change null key to be the empty string\r\n\r\n* Ensure temporary svg paths for Text are deleted\r\n\r\n* Remove unused dict_ops.py functions\r\n\r\n* Remove break_into_partial_movies from file_writer configuration\r\n\r\n* Rewrite guarantee_existence using Path\r\n\r\n* Clean up SceneFileWriter\r\n\r\nIt had a number of vestigial functions no longer used, and some setup that could be made more organized.\r\n\r\n* Remove --save_pngs CLI arg (which did nothing)\r\n\r\n* Add --subdivide CLI arg\r\n\r\n* Remove add_extension_if_not_present\r\n\r\n* Remove get_sorted_integer_files\r\n\r\n* Have find_file return Path\r\n\r\n* Minor clean up\r\n\r\n* Clean up num_tex_symbols\r\n\r\n* Fix find_file\r\n\r\n* Minor cleanup for extract_scene.py\r\n\r\n* Add preview_frame_while_skipping option to scene config\r\n\r\n* Use shell.showtraceback function\r\n\r\n* Move keybindings to config, instead of in-place constants\r\n\r\n* Replace DEGREES -> DEG\r\n\r\n* Add arg to clear the cache\r\n\r\n* Separate out full_tex_to_svg from tex_to_svg\r\n\r\nAnd only cache to disk the results of full_tex_to_svg.  Otherwise, making edits to the tex_templates would not show up without clearing the cache.\r\n\r\n* Bug fix in handling BlankScene\r\n\r\n* Make checkpoint_states an instance variable of CheckpointManager\r\n\r\nAs per https://github.com/3b1b/manim/issues/2272\r\n\r\n* Move resizing out of Window.focus, and into Window.init_for_scene\r\n\r\n* Make default output directory \".\" instead of \"\"\r\n\r\nTo address https://github.com/3b1b/manim/issues/2261\r\n\r\n* Remove input_file_path arg from SceneFileWriter\r\n\r\n* Use Dict syntax in place of dict for config more consistently across config.py\r\n\r\n* Simplify get_output_directory\r\n\r\n* Swap order of preamble and additional preamble\r\n\r\n* Minor stylistic tweak\r\n\r\n* Have UnitInterval pass on kwargs to NumberLine\r\n\r\n* Add simple get_dist function\r\n\r\n* Have TracedPath always update to the stroke configuration passed in\r\n\r\n* Have Mobject.match_points apply to all parts of data in pointlike_data_key\r\n\r\n* Always call Mobject.update upon adding an updater\r\n\r\n* Add Surface.uv_to_point\r\n\r\n* Make sure Surface.set_opacity takes in a recurse option\r\n\r\n* Update num_tex_symbols to account for \\{ and \\}",
+      "changes": [
+        {
+          "file": "manimlib/mobject/changing.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -112,7 +112,7 @@ def __init__(\n         self.time: float = 0\n         self.traced_points: list[np.ndarray] = []\n         self.add_updater(lambda m, dt: m.update_path(dt))\n-        self.set_stroke(stroke_color, stroke_width)\n+        self.always.set_stroke(stroke_color, stroke_width)\n \n     def update_path(self, dt: float) -> Self:\n         if dt == 0:"
+        },
+        {
+          "file": "manimlib/mobject/mobject.py",
+          "additions": 7,
+          "deletions": 3,
+          "patch": "@@ -307,12 +307,15 @@ def apply_points_function(\n                 parent.refresh_bounding_box()\n         return self\n \n-    # Others related to points\n-\n+    @affects_data\n     def match_points(self, mobject: Mobject) -> Self:\n-        self.set_points(mobject.get_points())\n+        self.resize_points(len(mobject.data), resize_func=resize_preserving_order)\n+        for key in self.pointlike_data_keys:\n+            self.data[key][:] = mobject.data[key]\n         return self\n \n+    # Others related to points\n+\n     def get_points(self) -> Vect3Array:\n         return self.data[\"point\"]\n \n@@ -842,6 +845,7 @@ def add_updater(self, update_func: Updater, call: bool = True) -> Self:\n         if call:\n             self.update(dt=0)\n         self.refresh_has_updater_status()\n+        self.update()\n         return self\n \n     def insert_updater(self, update_func: Updater, index=0):"
+        },
+        {
+          "file": "manimlib/mobject/number_line.py",
+          "additions": 3,
+          "deletions": 1,
+          "patch": "@@ -221,11 +221,13 @@ def __init__(\n         big_tick_numbers: list[float] = [0, 1],\n         decimal_number_config: dict = dict(\n             num_decimal_places=1,\n-        )\n+        ),\n+        **kwargs\n     ):\n         super().__init__(\n             x_range=x_range,\n             unit_size=unit_size,\n             big_tick_numbers=big_tick_numbers,\n             decimal_number_config=decimal_number_config,\n+            **kwargs\n         )"
+        },
+        {
+          "file": "manimlib/utils/space_ops.py",
+          "additions": 4,
+          "deletions": 0,
+          "patch": "@@ -48,6 +48,10 @@ def get_norm(vect: VectN | List[float]) -> float:\n     return sum((x**2 for x in vect))**0.5\n \n \n+def get_dist(vect1: VectN, vect2: VectN):\n+    return get_norm(vect2 - vect1)\n+\n+\n def normalize(\n     vect: VectN | List[float],\n     fall_back: VectN | List[float] | None = None"
+        },
+        {
+          "file": "manimlib/utils/tex.py",
+          "additions": 4,
+          "deletions": 1,
+          "patch": "@@ -11,7 +11,8 @@ def num_tex_symbols(tex: str) -> int:\n     tex = remove_tex_environments(tex)\n     commands_pattern = r\"\"\"\n         (?P<sqrt>\\\\sqrt\\[[0-9]+\\])|    # Special sqrt with number\n-        (?P<cmd>\\\\[a-zA-Z!,-/:;<>]+)   # Regular commands\n+        (?P<escaped_brace>\\\\[{}])|      # Escaped braces\n+        (?P<cmd>\\\\[a-zA-Z!,-/:;<>]+)    # Regular commands\n     \"\"\"\n     total = 0\n     pos = 0\n@@ -21,6 +22,8 @@ def num_tex_symbols(tex: str) -> int:\n \n         if match.group(\"sqrt\"):\n             total += len(match.group()) - 5\n+        elif match.group(\"escaped_brace\"):\n+            total += 1  # Count escaped brace as one symbol\n         else:\n             total += TEX_TO_SYMBOL_COUNT.get(match.group(), 1)\n         pos = match.end()"
+        },
+        {
+          "file": "manimlib/utils/tex_file_writing.py",
+          "additions": 1,
+          "deletions": 4,
+          "patch": "@@ -22,10 +22,7 @@ def get_tex_template_config(template_name: str) -> dict[str, str]:\n     with open(template_path, encoding=\"utf-8\") as tex_templates_file:\n         templates_dict = yaml.safe_load(tex_templates_file)\n     if name not in templates_dict:\n-        log.warning(\n-            \"Cannot recognize template '%s', falling back to 'default'.\",\n-            name\n-        )\n+        log.warning(f\"Cannot recognize template {name}, falling back to 'default'.\")\n         name = \"default\"\n     return templates_dict[name]\n "
+        }
+      ]
+    },
+    {
+      "sha": "f427fc67df75513be0cd3f3329e327a9a19401c3",
+      "message": "A few bug fixes (#2277)\n\n* Comment tweak\r\n\r\n* Directly print traceback\r\n\r\nSince the shell.showtraceback is giving some issues\r\n\r\n* Make InteracrtiveSceneEmbed into a class\r\n\r\nThis way it can keep track of it's internal shell; use of get_ipython has a finicky relationship with reloading.\r\n\r\n* Move remaining checkpoint_paste logic into scene_embed.py\r\n\r\nThis involved making a few context managers for Scene: temp_record, temp_skip, temp_progress_bar, which seem useful in and of themselves.\r\n\r\n* Change null key to be the empty string\r\n\r\n* Ensure temporary svg paths for Text are deleted\r\n\r\n* Remove unused dict_ops.py functions\r\n\r\n* Remove break_into_partial_movies from file_writer configuration\r\n\r\n* Rewrite guarantee_existence using Path\r\n\r\n* Clean up SceneFileWriter\r\n\r\nIt had a number of vestigial functions no longer used, and some setup that could be made more organized.\r\n\r\n* Remove --save_pngs CLI arg (which did nothing)\r\n\r\n* Add --subdivide CLI arg\r\n\r\n* Remove add_extension_if_not_present\r\n\r\n* Remove get_sorted_integer_files\r\n\r\n* Have find_file return Path\r\n\r\n* Minor clean up\r\n\r\n* Clean up num_tex_symbols\r\n\r\n* Fix find_file\r\n\r\n* Minor cleanup for extract_scene.py\r\n\r\n* Add preview_frame_while_skipping option to scene config\r\n\r\n* Use shell.showtraceback function\r\n\r\n* Move keybindings to config, instead of in-place constants\r\n\r\n* Replace DEGREES -> DEG\r\n\r\n* Add arg to clear the cache\r\n\r\n* Separate out full_tex_to_svg from tex_to_svg\r\n\r\nAnd only cache to disk the results of full_tex_to_svg.  Otherwise, making edits to the tex_templates would not show up without clearing the cache.\r\n\r\n* Bug fix in handling BlankScene\r\n\r\n* Make checkpoint_states an instance variable of CheckpointManager\r\n\r\nAs per https://github.com/3b1b/manim/issues/2272\r\n\r\n* Move resizing out of Window.focus, and into Window.init_for_scene\r\n\r\n* Make default output directory \".\" instead of \"\"\r\n\r\nTo address https://github.com/3b1b/manim/issues/2261\r\n\r\n* Remove input_file_path arg from SceneFileWriter\r\n\r\n* Use Dict syntax in place of dict for config more consistently across config.py\r\n\r\n* Simplify get_output_directory\r\n\r\n* Swap order of preamble and additional preamble",
+      "changes": [
+        {
+          "file": "manimlib/__main__.py",
+          "additions": 3,
+          "deletions": 0,
+          "patch": "@@ -5,6 +5,7 @@\n from manimlib.config import manim_config\n from manimlib.config import parse_cli\n import manimlib.extract_scene\n+from manimlib.utils.cache import clear_cache\n from manimlib.window import Window\n \n \n@@ -54,6 +55,8 @@ def main():\n     args = parse_cli()\n     if args.version and args.file is None:\n         return\n+    if args.clear_cache:\n+        clear_cache()\n \n     run_scenes()\n "
+        },
+        {
+          "file": "manimlib/extract_scene.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -111,7 +111,7 @@ def get_scenes_to_render(all_scene_classes: list, scene_config: Dict, run_config\n def get_scene_classes(module: Optional[Module]):\n     if module is None:\n         # If no module was passed in, just play the blank scene\n-        return [BlankScene(**scene_config)]\n+        return [BlankScene]\n     if hasattr(module, \"SCENES_IN_ORDER\"):\n         return module.SCENES_IN_ORDER\n     else:"
+        },
+        {
+          "file": "manimlib/scene/scene_file_writer.py",
+          "additions": 1,
+          "deletions": 4,
+          "patch": "@@ -34,10 +34,8 @@ def __init__(\n         png_mode: str = \"RGBA\",\n         save_last_frame: bool = False,\n         movie_file_extension: str = \".mp4\",\n-        # What python file is generating this scene\n-        input_file_path: str = \"\",\n         # Where should this be written\n-        output_directory: str = \"\",\n+        output_directory: str = \".\",\n         file_name: str | None = None,\n         open_file_upon_completion: bool = False,\n         show_file_location_upon_completion: bool = False,\n@@ -57,7 +55,6 @@ def __init__(\n         self.png_mode = png_mode\n         self.save_last_frame = save_last_frame\n         self.movie_file_extension = movie_file_extension\n-        self.input_file_path = input_file_path\n         self.output_directory = output_directory\n         self.file_name = file_name\n         self.open_file_upon_completion = open_file_upon_completion"
+        }
+      ]
+    },
+    {
+      "sha": "33dbf049856f0f9e42b6791d926fe04707128440",
+      "message": "Make checkpoint_states an instance variable of CheckpointManager (#2273)\n\nAs per https://github.com/3b1b/manim/issues/2272",
+      "changes": [
+        {
+          "file": "manimlib/scene/scene_embed.py",
+          "additions": 2,
+          "deletions": 1,
+          "patch": "@@ -157,7 +157,8 @@ def checkpoint_paste(\n \n \n class CheckpointManager:\n-    checkpoint_states: dict[str, list[tuple[Mobject, Mobject]]] = dict()\n+    def __init__(self):\n+        self.checkpoint_states: dict[str, list[tuple[Mobject, Mobject]]] = dict()\n \n     def checkpoint_paste(self, shell, scene):\n         \"\"\""
+        }
+      ]
+    },
+    {
+      "sha": "744e695340c5691551f2650d99db71964cb292c7",
+      "message": "Misc. clean up (#2269)\n\n* Comment tweak\r\n\r\n* Directly print traceback\r\n\r\nSince the shell.showtraceback is giving some issues\r\n\r\n* Make InteracrtiveSceneEmbed into a class\r\n\r\nThis way it can keep track of it's internal shell; use of get_ipython has a finicky relationship with reloading.\r\n\r\n* Move remaining checkpoint_paste logic into scene_embed.py\r\n\r\nThis involved making a few context managers for Scene: temp_record, temp_skip, temp_progress_bar, which seem useful in and of themselves.\r\n\r\n* Change null key to be the empty string\r\n\r\n* Ensure temporary svg paths for Text are deleted\r\n\r\n* Remove unused dict_ops.py functions\r\n\r\n* Remove break_into_partial_movies from file_writer configuration\r\n\r\n* Rewrite guarantee_existence using Path\r\n\r\n* Clean up SceneFileWriter\r\n\r\nIt had a number of vestigial functions no longer used, and some setup that could be made more organized.\r\n\r\n* Remove --save_pngs CLI arg (which did nothing)\r\n\r\n* Add --subdivide CLI arg\r\n\r\n* Remove add_extension_if_not_present\r\n\r\n* Remove get_sorted_integer_files\r\n\r\n* Have find_file return Path\r\n\r\n* Minor clean up\r\n\r\n* Clean up num_tex_symbols\r\n\r\n* Fix find_file\r\n\r\n* Minor cleanup for extract_scene.py\r\n\r\n* Add preview_frame_while_skipping option to scene config\r\n\r\n* Use shell.showtraceback function\r\n\r\n* Move keybindings to config, instead of in-place constants\r\n\r\n* Replace DEGREES -> DEG",
+      "changes": [
+        {
+          "file": "example_scenes.py",
+          "additions": 5,
+          "deletions": 5,
+          "patch": "@@ -190,7 +190,7 @@ def construct(self):\n                 # to go to a non-equal substring from the target,\n                 # use the key map.\n                 key_map={\"+\": \"-\"},\n-                path_arc=90 * DEGREES,\n+                path_arc=90 * DEG,\n             ),\n         )\n         self.wait()\n@@ -203,7 +203,7 @@ def construct(self):\n             TransformMatchingStrings(\n                 lines[2].copy(), lines[3],\n                 key_map={\"2\": R\"\\sqrt\"},\n-                path_arc=-30 * DEGREES,\n+                path_arc=-30 * DEG,\n             ),\n         )\n         self.wait(2)\n@@ -616,8 +616,8 @@ def construct(self):\n         self.play(\n             Transform(surface, surfaces[2]),\n             # Move camera frame during the transition\n-            self.frame.animate.increment_phi(-10 * DEGREES),\n-            self.frame.animate.increment_theta(-20 * DEGREES),\n+            self.frame.animate.increment_phi(-10 * DEG),\n+            self.frame.animate.increment_theta(-20 * DEG),\n             run_time=3\n         )\n         # Add ambient rotation\n@@ -666,7 +666,7 @@ def construct(self):\n         self.play(ReplacementTransform(square, circle))\n         self.wait()\n         self.play(circle.animate.stretch(4, 0))\n-        self.play(Rotate(circle, 90 * DEGREES))\n+        self.play(Rotate(circle, 90 * DEG))\n         self.play(circle.animate.shift(2 * RIGHT).scale(0.25))\n \n         text = Text(\"\"\""
+        },
+        {
+          "file": "manimlib/animation/indication.py",
+          "additions": 2,
+          "deletions": 2,
+          "patch": "@@ -14,7 +14,7 @@\n from manimlib.constants import FRAME_X_RADIUS, FRAME_Y_RADIUS\n from manimlib.constants import ORIGIN, RIGHT, UP\n from manimlib.constants import SMALL_BUFF\n-from manimlib.constants import DEGREES\n+from manimlib.constants import DEG\n from manimlib.constants import TAU\n from manimlib.constants import GREY, YELLOW\n from manimlib.mobject.geometry import Circle\n@@ -395,7 +395,7 @@ def interpolate_submobject(\n \n \n class TurnInsideOut(Transform):\n-    def __init__(self, mobject: Mobject, path_arc: float = 90 * DEGREES, **kwargs):\n+    def __init__(self, mobject: Mobject, path_arc: float = 90 * DEG, **kwargs):\n         super().__init__(mobject, path_arc=path_arc, **kwargs)\n \n     def create_target(self) -> Mobject:"
+        },
+        {
+          "file": "manimlib/animation/transform.py",
+          "additions": 2,
+          "deletions": 2,
+          "patch": "@@ -5,7 +5,7 @@\n import numpy as np\n \n from manimlib.animation.animation import Animation\n-from manimlib.constants import DEGREES\n+from manimlib.constants import DEG\n from manimlib.constants import OUT\n from manimlib.mobject.mobject import Group\n from manimlib.mobject.mobject import Mobject\n@@ -314,7 +314,7 @@ def init_path_func(self) -> None:\n \n \n class CyclicReplace(Transform):\n-    def __init__(self, *mobjects: Mobject, path_arc=90 * DEGREES, **kwargs):\n+    def __init__(self, *mobjects: Mobject, path_arc=90 * DEG, **kwargs):\n         super().__init__(Group(*mobjects), path_arc=path_arc, **kwargs)\n \n     def create_target(self) -> Mobject:"
+        },
+        {
+          "file": "manimlib/camera/camera_frame.py",
+          "additions": 4,
+          "deletions": 4,
+          "patch": "@@ -6,7 +6,7 @@\n import numpy as np\n from scipy.spatial.transform import Rotation\n \n-from manimlib.constants import DEGREES, RADIANS\n+from manimlib.constants import DEG, RADIANS\n from manimlib.constants import FRAME_SHAPE\n from manimlib.constants import DOWN, LEFT, ORIGIN, OUT, RIGHT, UP\n from manimlib.constants import PI\n@@ -26,7 +26,7 @@ def __init__(\n         frame_shape: tuple[float, float] = FRAME_SHAPE,\n         center_point: Vect3 = ORIGIN,\n         # Field of view in the y direction\n-        fovy: float = 45 * DEGREES,\n+        fovy: float = 45 * DEG,\n         euler_axes: str = \"zxz\",\n         # This keeps it ordered first in a scene\n         z_index=-1,\n@@ -181,7 +181,7 @@ def reorient(\n         Shortcut for set_euler_angles, defaulting to taking\n         in angles in degrees\n         \"\"\"\n-        self.set_euler_angles(theta_degrees, phi_degrees, gamma_degrees, units=DEGREES)\n+        self.set_euler_angles(theta_degrees, phi_degrees, gamma_degrees, units=DEG)\n         if center is not None:\n             self.move_to(np.array(center))\n         if height is not None:\n@@ -209,7 +209,7 @@ def increment_gamma(self, dgamma: float, units=RADIANS):\n         self.increment_euler_angles(dgamma=dgamma, units=units)\n         return self\n \n-    def add_ambient_rotation(self, angular_speed=1 * DEGREES):\n+    def add_ambient_rotation(self, angular_speed=1 * DEG):\n         self.add_updater(lambda m, dt: m.increment_theta(angular_speed * dt))\n         return self\n "
+        },
+        {
+          "file": "manimlib/constants.py",
+          "additions": 3,
+          "deletions": 2,
+          "patch": "@@ -61,9 +61,10 @@\n # Angles\n PI: float = np.pi\n TAU: float = 2 * PI\n-DEGREES: float = TAU / 360\n+DEG: float = TAU / 360\n+DEGREES = DEG  # Many older animations use teh full name\n # Nice to have a constant for readability\n-# when juxtaposed with expressions like 30 * DEGREES\n+# when juxtaposed with expressions like 30 * DEG\n RADIANS: float = 1\n \n # Related to Text"
+        },
+        {
+          "file": "manimlib/mobject/coordinate_systems.py",
+          "additions": 3,
+          "deletions": 3,
+          "patch": "@@ -7,7 +7,7 @@\n import itertools as it\n \n from manimlib.constants import BLACK, BLUE, BLUE_D, BLUE_E, GREEN, GREY_A, WHITE, RED\n-from manimlib.constants import DEGREES, PI\n+from manimlib.constants import DEG, PI\n from manimlib.constants import DL, UL, DOWN, DR, LEFT, ORIGIN, OUT, RIGHT, UP\n from manimlib.constants import FRAME_X_RADIUS, FRAME_Y_RADIUS\n from manimlib.constants import MED_SMALL_BUFF, SMALL_BUFF\n@@ -307,7 +307,7 @@ def get_graph_label(\n \n         point = self.input_to_graph_point(x, graph)\n         angle = self.angle_of_tangent(x, graph)\n-        normal = rotate_vector(RIGHT, angle + 90 * DEGREES)\n+        normal = rotate_vector(RIGHT, angle + 90 * DEG)\n         if normal[1] < 0:\n             normal *= -1\n         label.next_to(point, normal, buff=buff)\n@@ -474,7 +474,7 @@ def __init__(\n             ),\n             length=height,\n         )\n-        self.y_axis.rotate(90 * DEGREES, about_point=ORIGIN)\n+        self.y_axis.rotate(90 * DEG, about_point=ORIGIN)\n         # Add as a separate group in case various other\n         # mobjects are added to self, as for example in\n         # NumberPlane below"
+        },
+        {
+          "file": "manimlib/mobject/geometry.py",
+          "additions": 2,
+          "deletions": 2,
+          "patch": "@@ -7,7 +7,7 @@\n from manimlib.constants import DL, DOWN, DR, LEFT, ORIGIN, OUT, RIGHT, UL, UP, UR\n from manimlib.constants import GREY_A, RED, WHITE, BLACK\n from manimlib.constants import MED_SMALL_BUFF, SMALL_BUFF\n-from manimlib.constants import DEGREES, PI, TAU\n+from manimlib.constants import DEG, PI, TAU\n from manimlib.mobject.mobject import Mobject\n from manimlib.mobject.types.vectorized_mobject import DashedVMobject\n from manimlib.mobject.types.vectorized_mobject import VGroup\n@@ -983,7 +983,7 @@ def __init__(\n     ):\n         # Defaults to 0 for odd, 90 for even\n         if start_angle is None:\n-            start_angle = (n % 2) * 90 * DEGREES\n+            start_angle = (n % 2) * 90 * DEG\n         start_vect = rotate_vector(radius * RIGHT, start_angle)\n         vertices = compass_directions(n, start_vect)\n         super().__init__(*vertices, **kwargs)"
+        },
+        {
+          "file": "manimlib/mobject/matrix.py",
+          "additions": 2,
+          "deletions": 2,
+          "patch": "@@ -3,7 +3,7 @@\n import numpy as np\n \n from manimlib.constants import DOWN, LEFT, RIGHT, ORIGIN\n-from manimlib.constants import DEGREES\n+from manimlib.constants import DEG\n from manimlib.mobject.numbers import DecimalNumber\n from manimlib.mobject.svg.tex_mobject import Tex\n from manimlib.mobject.types.vectorized_mobject import VGroup\n@@ -196,7 +196,7 @@ def swap_entries_for_ellipses(\n                 dots.set_width(hdots_width)\n                 self.swap_entry_for_dots(row[col_index], dots)\n         if use_vdots and use_hdots:\n-            rows[row_index][col_index].rotate(-45 * DEGREES)\n+            rows[row_index][col_index].rotate(-45 * DEG)\n         return self\n \n     def get_mob_matrix(self) -> VMobjectMatrixType:"
+        },
+        {
+          "file": "manimlib/mobject/mobject_update_utils.py",
+          "additions": 2,
+          "deletions": 2,
+          "patch": "@@ -2,7 +2,7 @@\n \n import inspect\n \n-from manimlib.constants import DEGREES\n+from manimlib.constants import DEG\n from manimlib.constants import RIGHT\n from manimlib.mobject.mobject import Mobject\n from manimlib.utils.simple_functions import clip\n@@ -71,7 +71,7 @@ def always_shift(\n \n def always_rotate(\n     mobject: Mobject,\n-    rate: float = 20 * DEGREES,\n+    rate: float = 20 * DEG,\n     **kwargs\n ) -> Mobject:\n     mobject.add_updater("
+        },
+        {
+          "file": "manimlib/mobject/types/vectorized_mobject.py",
+          "additions": 4,
+          "deletions": 4,
+          "patch": "@@ -7,7 +7,7 @@\n from manimlib.constants import GREY_A, GREY_C, GREY_E\n from manimlib.constants import BLACK\n from manimlib.constants import DEFAULT_STROKE_WIDTH\n-from manimlib.constants import DEGREES\n+from manimlib.constants import DEG\n from manimlib.constants import ORIGIN, OUT\n from manimlib.constants import PI\n from manimlib.constants import TAU\n@@ -490,7 +490,7 @@ def add_cubic_bezier_curve_to(\n         v1 = handle1 - last\n         v2 = anchor - handle2\n         angle = angle_between_vectors(v1, v2)\n-        if self.use_simple_quadratic_approx and angle < 45 * DEGREES:\n+        if self.use_simple_quadratic_approx and angle < 45 * DEG:\n             quad_approx = [last, find_intersection(last, v1, anchor, -v2), anchor]\n         else:\n             quad_approx = get_quadratic_approximation_of_cubic(\n@@ -616,7 +616,7 @@ def subdivide_curves_by_condition(\n \n     def subdivide_sharp_curves(\n         self,\n-        angle_threshold: float = 30 * DEGREES,\n+        angle_threshold: float = 30 * DEG,\n         recurse: bool = True\n     ) -> Self:\n         def tuple_to_subdivisions(b0, b1, b2):\n@@ -656,7 +656,7 @@ def set_points_smoothly(\n         self.make_smooth(approx=approx)\n         return self\n \n-    def is_smooth(self, angle_tol=1 * DEGREES) -> bool:\n+    def is_smooth(self, angle_tol=1 * DEG) -> bool:\n         angles = np.abs(self.get_joint_angles()[0::2])\n         return (angles < angle_tol).all()\n "
+        },
+        {
+          "file": "manimlib/scene/scene_embed.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -102,7 +102,7 @@ def ensure_flash_on_error(self):\n         \"\"\"Flash border, and potentially play sound, on exceptions\"\"\"\n         def custom_exc(shell, etype, evalue, tb, tb_offset=None):\n             # Show the error don't just swallow it\n-            print(''.join(traceback.format_exception(etype, evalue, tb)))\n+            shell.showtraceback((etype, evalue, tb), tb_offset=tb_offset)\n             rect = FullScreenRectangle().set_stroke(RED, 30).set_fill(opacity=0)\n             rect.fix_in_frame()\n             self.scene.play(VFadeInThenOut(rect, run_time=0.5))"
+        }
+      ]
+    },
+    {
+      "sha": "bafea89ac9d11dc168bce923a65501ec74312afe",
+      "message": "Update InteractiveSceneEmbed (#2267)\n\n* Comment tweak\r\n\r\n* Directly print traceback\r\n\r\nSince the shell.showtraceback is giving some issues\r\n\r\n* Make InteracrtiveSceneEmbed into a class\r\n\r\nThis way it can keep track of it's internal shell; use of get_ipython has a finicky relationship with reloading.\r\n\r\n* Move remaining checkpoint_paste logic into scene_embed.py\r\n\r\nThis involved making a few context managers for Scene: temp_record, temp_skip, temp_progress_bar, which seem useful in and of themselves.\r\n\r\n* Change null key to be the empty string",
+      "changes": [
+        {
+          "file": "manimlib/module_loader.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -146,7 +146,7 @@ def _deep_reload(module: Module, reloaded_modules_tracker: set[str]):\n         if ignore_manimlib_modules and module.__name__.startswith(\"manimlib\"):\n             return\n         if module.__name__.startswith(\"manimlib.config\"):\n-            # We don't want to reload global config\n+            # We don't want to reload global manim_config\n             return\n \n         if not hasattr(module, \"__dict__\"):"
+        }
+      ]
+    },
+    {
+      "sha": "5fcb668f07fa8ddecf346bb1832da18cb4fbf7f2",
+      "message": "fixing `get_ipython` import error",
+      "changes": [
+        {
+          "file": "manimlib/scene/scene.py",
+          "additions": 1,
+          "deletions": 1,
+          "patch": "@@ -1,12 +1,12 @@\n from __future__ import annotations\n \n from collections import OrderedDict\n-import os\n import platform\n import random\n import time\n from functools import wraps\n \n+from IPython.core.getipython import get_ipython\n from pyglet.window import key as PygletWindowKeys\n \n import numpy as np"
+        },
+        {
+          "file": "manimlib/scene/scene_embed.py",
+          "additions": 2,
+          "deletions": 1,
+          "patch": "@@ -1,7 +1,8 @@\n import inspect\n import pyperclip\n-import re\n+import os\n \n+from IPython.core.getipython import get_ipython\n from IPython.terminal import pt_inputhooks\n from IPython.terminal.embed import InteractiveShellEmbed\n "
+        }
+      ]
+    }
+  ]
+}
